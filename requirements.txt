@@ -2,5 +2,4 @@ argopy==0.1.15
 fastapi==0.111.0
 gunicorn==22.0.0
 pydantic==2.7.1
-setuptools==69.5.1
 uvicorn==0.29.0

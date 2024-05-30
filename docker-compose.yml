@@ -1,0 +1,18 @@
+services:
+  app:
+    image: odbargo_app
+    ports:
+      - "8090:8090" 
+    networks:
+      argonet:
+        ipv4_address: 172.22.0.2
+    dns:
+      - 8.8.8.8
+      - 8.8.4.4
+networks:
+  argonet:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.22.0.0/24
+          gateway: 172.22.0.1

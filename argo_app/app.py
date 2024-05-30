@@ -1,18 +1,20 @@
 # import xarray as xr
 import argopy
 from argopy import DataFetcher
-from fastapi import FastAPI, Query, BackgroundTasks, WebSocket, TTPException #status
+from fastapi import FastAPI, BackgroundTasks, WebSocket #HTTPException, Query, status
 from fastapi.openapi.docs import get_swagger_ui_html
 from fastapi.openapi.utils import get_openapi
 from fastapi.responses import JSONResponse #, ORJSONResponse
 import os, zipfile, tempfile, asyncio #shutil
-import src.config as config
-from pydantic import BaseModel
-from typing import List #Optional, Union
+from argo_app.src import config
+# import argo_app.src.config as config
+from pydantic import BaseModel, Field
+from typing import List # Optional, Query
 # import requests, json
 # from fastapi.encoders import jsonable_encoder
 from contextlib import asynccontextmanager
 from datetime import datetime # timedelta
+import uvicorn
 # from dask.distributed import Client
 # client = Client('tcp://localhost:8786')
 
@@ -71,6 +73,12 @@ async def custom_swagger_ui_html():
         openapi_url="/argo/api/swagger/openapi.json", title=app.title
     )
 
+@app.get("/argo/api/test", tags=["Test"], summary="Test Argo operations")
+async def test_argo_connection():
+    config.download_status = "Success: message transmitted ok."
+    return {"success": "ok"}
+
+
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
@@ -101,8 +109,9 @@ def fetch_and_prepare_nc(wmo_list):
         with zipfile.ZipFile(zip_path, 'w') as z:
             z.write(nc_path, arcname='argo_data.nc')
             # z.write(profile_path, arcname='argo_profiles.nc')
-            
-        print(f"Data is ready and available at {zip_path}")
+
+        os.chmod(config.outputPath, 0o755) 
+        os.chmod(zip_path, 0o644)
         config.download_status = f"Data is ready and available at {zip_path}. Updated: {datetime.now()}"
         print(config.download_status)
    
@@ -111,11 +120,25 @@ def fetch_and_prepare_nc(wmo_list):
         print(config.download_status)
 
 class FloatDownloadRequest(BaseModel):
-    wmo_list: List[int]
+    wmo_list: List[int] = Field(
+        ...,
+        description="List of WMO identifiers for Argo floats to download data for.",
+        example=[5903377, 5903594]
+    )    
 
 @app.post("/api/floats/download/", tags=["Argo"], summary="Download Argo floats NetCDF")
 async def download_nc_file(background_tasks: BackgroundTasks, float_request: FloatDownloadRequest):
-    """Endpoint to start the background task of downloading NC data."""
+    """
+    Initiates a background task to download NetCDF files for specified Argo floats.
+
+    - **wmo_list**: A list of WMO identifiers for Argo floats and specified in POST request body.
+    """
     
     background_tasks.add_task(fetch_and_prepare_nc, float_request.wmo_list)
     return JSONResponse(content={"message": f"Download started at {datetime.now()}, you will be notified when it is ready."})
+
+def main():
+    uvicorn.run("argo_app.app:app", host="127.0.0.1", port=8090, log_level="info")
+
+if __name__ == "__main__":
+    main()
