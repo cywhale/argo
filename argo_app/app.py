@@ -5,6 +5,7 @@ from fastapi import FastAPI, BackgroundTasks, WebSocket #HTTPException, Query, s
 from fastapi.openapi.docs import get_swagger_ui_html
 from fastapi.openapi.utils import get_openapi
 from fastapi.responses import JSONResponse #, ORJSONResponse
+from fastapi.middleware.cors import CORSMiddleware
 import os, zipfile, tempfile, asyncio #shutil
 from argo_app.src import config
 # import argo_app.src.config as config
@@ -61,6 +62,13 @@ app = FastAPI(
     lifespan=lifespan, docs_url=None
 )  # , default_response_class=ORJSONResponse)
 
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Adjust this to your needs
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 @app.get("/argo/api/swagger/openapi.json", include_in_schema=False)
 async def custom_openapi():
@@ -126,7 +134,7 @@ class FloatDownloadRequest(BaseModel):
         example=[5903377, 5903594]
     )    
 
-@app.post("/api/floats/download/", tags=["Argo"], summary="Download Argo floats NetCDF")
+@app.post("/argo/api/floats/download/", tags=["Argo"], summary="Download Argo floats NetCDF")
 async def download_nc_file(background_tasks: BackgroundTasks, float_request: FloatDownloadRequest):
     """
     Initiates a background task to download NetCDF files for specified Argo floats.

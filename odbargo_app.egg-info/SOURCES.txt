@@ -1,7 +1,10 @@
 .gitignore
+Dockerfile
 Pipfile
 README.md
 change_log.md
+docker-compose.yml
+odbargo.spec
 requirements.txt
 setup.py
 argo_app/__init__.py
@@ -12,6 +15,8 @@ conf/simu.conf
 dev/argoBGC_nitrate_anomalies.ipynb
 dev/argo_writedb01.ipynb
 dev/try_antimeridian.py
+dist/odbargo_app-0.0.3-py3-none-any.whl
+dist/odbargo_app-0.0.3.tar.gz
 figs/Hawaii_BGC_floats_2008-2017.png
 figs/Hawaii_BGC_floats_profile_2008-2017.png
 figs/Hawaii_BGC_floats_trajectories.png
