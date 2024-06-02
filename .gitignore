@@ -38,3 +38,4 @@ node_modules
 **/*.nc
 **/src.egg-info
 **/*.mat
+**/*.exe
