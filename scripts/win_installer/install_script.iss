@@ -26,6 +26,9 @@ Name: "{group}\Uninstall odbargo_app"; Filename: "{uninstallexe}"
 SetupMessage=Welcome to the odbargo_app installer. Please ensure that your firewall and any containment software are configured to allow this application to run without restrictions. Failure to do so may result in the application not functioning correctly.
 
 [Code]
+var
+  CustomLabel: TLabel;
+
 const
   AppVersion = '0.0.3';
 
@@ -37,14 +40,27 @@ end;
 procedure InitializeWizard;
 begin
   MsgBox(CustomMessage('SetupMessage'), mbInformation, MB_OK);
+  
+  CustomLabel := TLabel.Create(WizardForm);
+  CustomLabel.Parent := WizardForm.InstallingPage;
+  CustomLabel.Left := 0;
+  CustomLabel.Top := WizardForm.ProgressGauge.Top + WizardForm.ProgressGauge.Height + 8;
+  CustomLabel.Width := WizardForm.ClientWidth;
+  CustomLabel.Height := 40;
+  CustomLabel.Caption := ' ';
+end;
+
+procedure CurPageChanged(CurPageID: Integer);
+begin
+  if CurPageID = wpInstalling  then
+  begin
+    CustomLabel.Caption := 'Watch the log/install_env.log to see the installation progress.';
+  end;
 end;
 
 procedure CurStepChanged(CurStep: TSetupStep);
 begin
-  if CurStep = ssInstall then begin
-    WizardForm.StatusLabel.Caption := 'Watch the log/install_env.log to see the installation progress.';
-  end
-  else if CurStep = ssPostInstall then begin
+  if CurStep = ssPostInstall then begin
     MsgBox('Installation complete. You can now start odbargo_app from the Start menu.' + #13#10 + 'Watch the log/install_env.log to see the installation progress.', mbInformation, MB_OK);
   end;
 end;
@@ -55,12 +71,12 @@ var
   ResultCode: Integer;
   ShouldRemoveEnv: Integer;
 begin
-  Result := MsgBox('Uninstall is initializing. Do you really want to start Uninstall?', mbConfirmation, MB_YESNO) = idYes;
+  Result := MsgBox('Uninstall is initializing. Do you really want to uninstall this App?', mbConfirmation, MB_YESNO) = idYes;
   if not Result then
     Abort();
 
   InstallationFolder := ExpandConstant('{app}');
-  ShouldRemoveEnv := MsgBox('Do you want to remove the entire virtual environment?', mbConfirmation, MB_YESNO);
+  ShouldRemoveEnv := MsgBox('Do you want to remove the Python virtual environment created by this App?', mbConfirmation, MB_YESNO);
 
   if ShouldRemoveEnv = idYes then
   begin

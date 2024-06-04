@@ -32,7 +32,7 @@ if "%remove_env%" == "true" (
         )
     ) else (
         echo Uninstalling odbargo_app package... >> %log_file%
-        call "%~dp0%env_name%\Scripts\activate" >> %log_file% 2>&1
+        call "%~dp0\..\%env_name%\Scripts\activate" >> %log_file% 2>&1
         pip uninstall odbargo_app -y >> %log_file% 2>&1
         if %ERRORLEVEL% neq 0 (
             echo Error uninstalling odbargo_app %ERRORLEVEL% >> %log_file%
@@ -40,8 +40,8 @@ if "%remove_env%" == "true" (
             exit /b %ERRORLEVEL%
         )
         echo Deactivating and removing virtual environment... >> %log_file%
-        call "%~dp0%env_name%\Scripts\deactivate" >> %log_file% 2>&1
-        rmdir /s /q %~dp0\%env_name% >> %log_file% 2>&1        
+        call "%~dp0\..\%env_name%\Scripts\deactivate" >> %log_file% 2>&1
+        rmdir /s /q %~dp0\..\%env_name% >> %log_file% 2>&1        
         if %ERRORLEVEL% neq 0 (
             echo Error removing virtual environment %ERRORLEVEL% >> %log_file%
             pause
@@ -63,7 +63,7 @@ if "%remove_env%" == "true" (
         call conda deactivate >> %log_file% 2>&1
     ) else (
         echo Uninstalling odbargo_app package... >> %log_file%
-        call "%~dp0%env_name%\Scripts\activate" >> %log_file% 2>&1
+        call "%~dp0\..\%env_name%\Scripts\activate" >> %log_file% 2>&1
         pip uninstall odbargo_app -y >> %log_file% 2>&1
         if %ERRORLEVEL% neq 0 (
             echo Error uninstalling odbargo_app %ERRORLEVEL% >> %log_file%
@@ -71,10 +71,9 @@ if "%remove_env%" == "true" (
             exit /b %ERRORLEVEL%
         )
         echo Deactivating virtual environment... >> %log_file%
-        call "%~dp0%env_name%\Scripts\deactivate" >> %log_file% 2>&1
+        call "%~dp0%\..\env_name%\Scripts\deactivate" >> %log_file% 2>&1
     )
 )
 
 echo Uninstallation completed at %date% %time% >> %log_file%
-pause
 endlocal

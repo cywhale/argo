@@ -81,7 +81,7 @@ if %ERRORLEVEL% neq 0 (
 )
 
 :: Check the Python version using the detected path
-%python_path% --version >> %log_file% 2>&1
+"%python_path%" --version >> %log_file% 2>&1
 if %ERRORLEVEL% neq 0 (
     echo Error: Python installation failed >> %log_file%
     exit /b 1
@@ -95,7 +95,7 @@ if exist "%~dp0\..\%env_name%" (
 ) else (
     :: Create a virtual environment using the detected Python
     echo Creating virtual environment... >> %log_file% 2>&1
-    %python_path% -m venv %~dp0\..\%env_name% >> %log_file% 2>&1
+    "%python_path%" -m venv %~dp0\..\%env_name% >> %log_file% 2>&1
     if %ERRORLEVEL% neq 0 (
         echo Error creating virtual environment >> %log_file%
         exit /b %ERRORLEVEL%
