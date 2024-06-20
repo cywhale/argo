@@ -1,18 +1,15 @@
 # import xarray as xr
 import argopy
 from argopy import DataFetcher
-from fastapi import FastAPI, BackgroundTasks, WebSocket #HTTPException, Query, status
+from fastapi import FastAPI, BackgroundTasks, WebSocket #HTTPException, Query
 from fastapi.openapi.docs import get_swagger_ui_html
 from fastapi.openapi.utils import get_openapi
 from fastapi.responses import JSONResponse #, ORJSONResponse
 from fastapi.middleware.cors import CORSMiddleware
-import os, zipfile, tempfile, asyncio #shutil
+import os, zipfile, tempfile, asyncio, sys
 from argo_app.src import config
-# import argo_app.src.config as config
 from pydantic import BaseModel, Field
-from typing import List # Optional, Query
-# import requests, json
-# from fastapi.encoders import jsonable_encoder
+from typing import List
 from contextlib import asynccontextmanager
 from datetime import datetime # timedelta
 import uvicorn
@@ -32,11 +29,11 @@ def generate_custom_openapi():
         ),
         routes=app.routes,
     )
-    # openapi_schema["servers"] = [
-    #    {
-    #        "url": "https://localhost:8090"
-    #    }
-    # ]
+    openapi_schema["servers"] = [
+        {
+            "url": "http://localhost:8090"
+        }
+    ]
     app.openapi_schema = openapi_schema
     return app.openapi_schema
 
@@ -146,7 +143,16 @@ async def download_nc_file(background_tasks: BackgroundTasks, float_request: Flo
     return JSONResponse(content={"message": f"Download started at {datetime.now()}, you will be notified when it is ready."})
 
 def main():
-    uvicorn.run("argo_app.app:app", host="127.0.0.1", port=8090, log_level="info")
+    try:
+        port = int(sys.argv[1]) if len(sys.argv) > 1 else config.default_port
+        if not (1024 < port < 65535):
+            raise ValueError("Port number must be between 1024 and 65535")
+    except (ValueError, IndexError) as e:
+        print(f"Invalid or missing port number: {e}")
+        sys.exit(1)
+
+    print("Odbargo running on port: ", port)
+    uvicorn.run("argo_app.app:app", host="127.0.0.1", port=port, log_level="info")
 
 if __name__ == "__main__":
     main()

@@ -4,3 +4,5 @@
     -- create window installer by Inno Setup
 	-- Make window installer can use Conda
 	-- Installer/uninstall works for Conda/Python
+
+#### ver 0.0.4 More customized functions/n1: adjustable running port
