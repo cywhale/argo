@@ -1,6 +1,8 @@
+#define AppVersion "0.0.4"
+
 [Setup]
 AppName=odbargo_app
-AppVersion=0.0.3
+AppVersion={#AppVersion}
 DefaultDirName={commonpf}\odbargo_app
 DefaultGroupName=odbargo_app
 UninstallDisplayIcon={app}\odbargo_app.ico
@@ -10,8 +12,9 @@ DisableDirPage=no
 SetupLogging=yes
 
 [Files]
-Source: "..\..\dist\odbargo_app-0.0.3.tar.gz"; DestDir: "{app}\src"; Flags: ignoreversion
+Source: "..\..\dist\odbargo_app-{#AppVersion}.tar.gz"; DestDir: "{app}\src"; Flags: ignoreversion
 Source: "install_env.bat"; DestDir: "{app}\src"; Flags: ignoreversion
+Source: "check_port.bat"; DestDir: "{app}\src"; Flags: ignoreversion
 Source: "start_odbargo.bat"; DestDir: "{app}"; Flags: ignoreversion
 Source: "uninstall_env.bat"; DestDir: "{app}\src"; Flags: ignoreversion
 
@@ -28,14 +31,6 @@ SetupMessage=Welcome to the odbargo_app installer. Please ensure that your firew
 [Code]
 var
   CustomLabel: TLabel;
-
-const
-  AppVersion = '0.0.3';
-
-function GetAppVersion(Param: String): String;
-begin
-  Result := AppVersion;
-end;
 
 procedure InitializeWizard;
 begin
@@ -62,6 +57,11 @@ procedure CurStepChanged(CurStep: TSetupStep);
 begin
   if CurStep = ssPostInstall then begin
     MsgBox('Installation complete. You can now start odbargo_app from the Start menu.' + #13#10 + 'Watch the log/install_env.log to see the installation progress.', mbInformation, MB_OK);
+    // Inform user about port
+    if FileExists(ExpandConstant('{app}\config_app.yaml')) then
+    begin
+      MsgBox('The application will run on the port specified in config_app.yaml. You can manually alter the port by modifying this file.', mbInformation, MB_OK);
+    end;	
   end;
 end;
 
@@ -111,3 +111,4 @@ end;
 Type: filesandordirs; Name: "{app}\log"
 Type: filesandordirs; Name: "{app}\src"
 Type: filesandordirs; Name: "{app}\venv"
+Type: filesandordirs; Name: "{app}\config_app.yaml"

@@ -4,7 +4,7 @@ setlocal
 :: Define global desired Python version and app version
 set desired_python_version=3.11.3
 set env_name=odbargo_env
-set app_version=0.0.3
+set app_version=0.0.4
 
 :: Create a log file
 set log_file=%~dp0\..\log\install_env.log
@@ -53,6 +53,7 @@ goto Conda_activate
 call conda activate %env_name% >> %log_file% 2>&1
 set python_path=%CONDA_PREFIX%\python.exe
 echo Using Conda Python path: %python_path% >> %log_file%
+echo environment: Conda > %~dp0\..\config_app.yaml
 goto install_app
 
 :Python_block
@@ -105,8 +106,11 @@ if exist "%~dp0\..\%env_name%" (
 )
 set python_path=%~dp0\..\%env_name%\Scripts\python.exe
 echo Using venv Python path: %python_path% >> %log_file%
+echo environment: Regular > %~dp0\..\config_app.yaml
 goto install_app
 
 :eof
+echo env_name: %env_name% >> %~dp0\..\config_app.yaml
 echo Environment setup completed at %date% %time% >> %log_file%
+call %~dp0\check_port.bat >> %log_file% 2>&1
 endlocal
