@@ -30,3 +30,7 @@ ref/1-s2.0-S0304420323000440-fig3.jpg
 ref/1-s2.0-S0304420323000440-main.pdf
 ref/Apex_ISUS_Float_list.html
 ref/aou.m
+scripts/win_installer/install_env.bat
+scripts/win_installer/install_script.iss
+scripts/win_installer/start_odbargo.bat
+scripts/win_installer/uninstall_env.bat
