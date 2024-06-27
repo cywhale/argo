@@ -7,3 +7,4 @@
 
 #### ver 0.0.4 More customized functions/n1: adjustable running port
     -- modify Inno Setup to check_port feed %PORT% into odbargo_app
+    -- add odbargo_app-0.0.4.installer.zip (.exe) in dist/ for downloading test

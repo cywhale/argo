@@ -31,7 +31,7 @@ def generate_custom_openapi():
     )
     openapi_schema["servers"] = [
         {
-            "url": "http://localhost:8090"
+            "url": f"http://localhost:{config.default_port}"
         }
     ]
     app.openapi_schema = openapi_schema
@@ -151,7 +151,8 @@ def main():
         print(f"Invalid or missing port number: {e}")
         sys.exit(1)
 
-    print("Odbargo running on port: ", port)
+    config.default_port = port
+    print("Odbargo running on port: ", config.default_port)
     uvicorn.run("argo_app.app:app", host="127.0.0.1", port=port, log_level="info")
 
 if __name__ == "__main__":
