@@ -9,4 +9,5 @@
     -- modify Inno Setup to check_port feed %PORT% into odbargo_app
     -- add odbargo_app-0.0.4.installer.zip (.exe) in dist/ for downloading test
 
-#### ver 0.0.5 Handle update logic to POSTGIS db/n1
+#### ver 0.0.5 Handle weekly update logic to POSTGIS db/n1
+    -- convert numpy types to python natvie types when writing into db
