@@ -16,4 +16,3 @@ exclude .gitignore
 exclude Dockerfile
 exclude docker-compose.yml
 exclude *.md
-exclude argo_app/odbargo_app.egg-info/*

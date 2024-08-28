@@ -14,3 +14,4 @@
     -- change build workflow, using pyproject.toml/drop some dummy columns in argofloats db
     -- update window installer (Inno Setup), reduce dummy file size greatly(not yet)/n1
     -- pyproject.toml build workflow trials (not yet)/n2
+    -- drop pyproject.toml, use setup.py (python -m build) to fix no entry: No module named argo_app/n3

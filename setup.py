@@ -1,7 +1,5 @@
 from setuptools import setup, find_packages
 
-# setup(name='src', version='1.0', packages=find_packages())
-
 setup(
     name="odbargo_app",
     version="0.0.5",
@@ -12,6 +10,7 @@ setup(
         "uvicorn",
         "argopy",
         "pydantic",
+        "numpy<2.0.0,>=1.26.4"
     ],
     entry_points={
         "console_scripts": [
