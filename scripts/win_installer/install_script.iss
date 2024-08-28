@@ -1,4 +1,4 @@
-#define AppVersion "0.0.4"
+#define AppVersion "0.0.5"
 
 [Setup]
 AppName=odbargo_app

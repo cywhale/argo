@@ -12,3 +12,4 @@
 #### ver 0.0.5 Handle weekly update logic to POSTGIS db/n1
     -- convert numpy types to python natvie types when writing into db
     -- change build workflow, using pyproject.toml/drop some dummy columns in argofloats db
+	-- update window installer (Inno Setup), reduce dummy file size greatly(not yet)/n1

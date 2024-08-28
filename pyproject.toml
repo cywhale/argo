@@ -20,3 +20,7 @@ odbargo_app = "argo_app.app:main"
 
 [tool.setuptools.packages.find]
 where = ["argo_app"]
+
+# Include package data if needed
+[tool.setuptools]
+include_package_data = true

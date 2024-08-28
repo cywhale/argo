@@ -4,7 +4,7 @@ setlocal
 :: Define global desired Python version and app version
 set desired_python_version=3.11.3
 set env_name=odbargo_env
-set app_version=0.0.4
+set app_version=0.0.5
 
 :: Create a log file
 set log_file=%~dp0\..\log\install_env.log
