@@ -6,16 +6,18 @@ from fastapi.openapi.docs import get_swagger_ui_html
 from fastapi.openapi.utils import get_openapi
 from fastapi.responses import JSONResponse #, ORJSONResponse
 from fastapi.middleware.cors import CORSMiddleware
-import os, zipfile, tempfile, asyncio, sys
+import os, tempfile, asyncio, sys #zipfile
 from argo_app.src import config
 from pydantic import BaseModel, Field
 from typing import List
 from contextlib import asynccontextmanager
 from datetime import datetime # timedelta
 import uvicorn
+import warnings
+
+warnings.filterwarnings("ignore", category=FutureWarning, message="The return type of `Dataset.dims` will be changed")
 # from dask.distributed import Client
 # client = Client('tcp://localhost:8786')
-
 
 def generate_custom_openapi():
     if app.openapi_schema:
@@ -43,13 +45,13 @@ async def lifespan(app: FastAPI):
     current_dir = os.path.abspath(os.path.dirname("__file__"))
     cache_dir = os.path.join(current_dir, config.cachePath)
     os.makedirs(cache_dir, exist_ok=True)
-    argopy.set_options(cachedir=cache_dir)    
+    argopy.set_options(cachedir=cache_dir)
     if (config.outputPath == ''):
         config.outputPath = tempfile.mkdtemp()
     if not os.path.exists(config.outputPath):
         os.makedirs(config.outputPath)
     print(f"APP start at {datetime.now()}, set cache at: {cache_dir}, output at: {config.outputPath}") 
-   
+
     yield
     # below code to execute when app is shutting down
     print(f"APP end at {datetime.now()}...")
@@ -106,20 +108,19 @@ def fetch_and_prepare_nc(wmo_list):
         config.ds = DataFetcher(ds='bgc', mode='expert', src='erddap', params='all', parallel=True).float(wmo_list).to_xarray()
         nc_path = os.path.join(config.outputPath, 'argo_data.nc')
         config.ds.to_netcdf(nc_path)
-        
         # profile_path = os.path.join(config.outputPath, 'argo_profiles.nc')
         # config.ds.argo.point2profile().to_netcdf(profile_path)
         # Zip the files. In real application, replace print with a notification mechanism
-        zip_path = os.path.join(config.outputPath, 'argo_data.zip')
-        with zipfile.ZipFile(zip_path, 'w') as z:
-            z.write(nc_path, arcname='argo_data.nc')
+        # zip_path = os.path.join(config.outputPath, 'argo_data.zip')
+        # with zipfile.ZipFile(zip_path, 'w') as z:
+            # z.write(nc_path, arcname='argo_data.nc')
             # z.write(profile_path, arcname='argo_profiles.nc')
-
-        os.chmod(config.outputPath, 0o755) 
-        os.chmod(zip_path, 0o644)
-        config.download_status = f"Data is ready and available at {zip_path}. Updated: {datetime.now()}"
+        # NetCDF and .zip are equally in size, so no need to compress .nc
+        os.chmod(config.outputPath, 0o755)
+        os.chmod(nc_path, 0o644) #zip_path
+        config.download_status = f"Data is ready and available at {nc_path}. Updated: {datetime.now()}"
         print(config.download_status)
-   
+
     except Exception as e:
         config.download_status = f"Error: {str(e)}"
         print(config.download_status)
@@ -129,7 +130,7 @@ class FloatDownloadRequest(BaseModel):
         ...,
         description="List of WMO identifiers for Argo floats to download data for.",
         example=[5903377, 5903594]
-    )    
+    )
 
 @app.post("/argo/api/floats/download/", tags=["Argo"], summary="Download Argo floats NetCDF")
 async def download_nc_file(background_tasks: BackgroundTasks, float_request: FloatDownloadRequest):
@@ -138,7 +139,7 @@ async def download_nc_file(background_tasks: BackgroundTasks, float_request: Flo
 
     - **wmo_list**: A list of WMO identifiers for Argo floats and specified in POST request body.
     """
-    
+
     background_tasks.add_task(fetch_and_prepare_nc, float_request.wmo_list)
     return JSONResponse(content={"message": f"Download started at {datetime.now()}, you will be notified when it is ready."})
 
