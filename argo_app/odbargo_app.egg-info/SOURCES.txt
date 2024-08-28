@@ -1,11 +1,7 @@
 MANIFEST.in
 pyproject.toml
 setup.py
-argo_app/odbargo_app.egg-info/PKG-INFO
-argo_app/odbargo_app.egg-info/SOURCES.txt
-argo_app/odbargo_app.egg-info/dependency_links.txt
-argo_app/odbargo_app.egg-info/entry_points.txt
-argo_app/odbargo_app.egg-info/requires.txt
-argo_app/odbargo_app.egg-info/top_level.txt
+argo_app/__init__.py
+argo_app/app.py
 argo_app/src/__init__.py
 argo_app/src/config.py

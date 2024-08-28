@@ -1,8 +1,9 @@
 # Include the package directory
+include argo_app/*.py
 include argo_app/src/*.py
 
 # Include the setup.py file
-include setup.py
+# include setup.py
 
 # Exclude unnecessary directories and files
 exclude dev/*
@@ -15,3 +16,4 @@ exclude .gitignore
 exclude Dockerfile
 exclude docker-compose.yml
 exclude *.md
+exclude argo_app/odbargo_app.egg-info/*
