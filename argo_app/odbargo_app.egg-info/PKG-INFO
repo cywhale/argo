@@ -1,0 +1,9 @@
+Metadata-Version: 2.1
+Name: odbargo_app
+Version: 0.0.5
+Summary: ODB Argo API
+Requires-Python: >=3.9
+Requires-Dist: fastapi
+Requires-Dist: uvicorn
+Requires-Dist: argopy
+Requires-Dist: pydantic

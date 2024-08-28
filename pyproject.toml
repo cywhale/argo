@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=42", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "odbargo_app"
+version = "0.0.5"
+description = "ODB Argo API"
+requires-python = ">=3.9"
+
+dependencies = [
+    "fastapi",
+    "uvicorn",
+    "argopy",
+    "pydantic"
+]
+
+[project.scripts]
+odbargo_app = "argo_app.app:main"
+
+[tool.setuptools.packages.find]
+where = ["argo_app"]

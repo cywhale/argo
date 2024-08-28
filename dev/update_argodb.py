@@ -55,7 +55,7 @@ def convert_types_dict(data):
 def create_geojson_line(group):
     if len(group) < 2:
         return None
-    
+ 
     points = [geojson.Point((lon, lat)) for lon, lat in zip(group['longitude'], group['latitude'])]
     properties = {
         'wmo': int(group['wmo'].iloc[0]),
@@ -127,9 +127,9 @@ class ArgoFloat(Base):
     longitude = Column(Float, nullable=False)
     ocean = Column(TEXT)
     profiler = Column(TEXT)
-    profiler_code = Column(Integer)
+    #profiler_code = Column(Integer)
     institution = Column(TEXT)
-    institution_code = Column(TEXT)
+    #institution_code = Column(TEXT)
     date_update = Column(TIMESTAMP(timezone=True))
     wmo = Column(Integer, ForeignKey(WMOTABLE + '.wmo'))
     cyc = Column(Integer, nullable=False, primary_key=True)
@@ -137,7 +137,7 @@ class ArgoFloat(Base):
     data_mode = Column(TEXT, nullable=False)
     geom = Column(Geometry(geometry_type='POINT', srid=4326))
     update_timestamp = Column(TIMESTAMP(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
-    
+
     __table_args__ = (
         Index('argofloats_date_idx', 'date'),
         Index('argofloats_wmo_cyc_parameter_date_key', 'wmo', 'cyc', 'parameter', 'date', unique=True),
@@ -203,7 +203,7 @@ def update_database(session, dfo, df_w, current_timestamp):
                 institution=group['institution'].iloc[0]
             )
             session.add(argo_wmo)
-        
+
         geojson_string = create_geojson_line(group)
         line_geom = from_shape(LineString(list(zip(group['longitude'], group['latitude']))), srid=4326) if geojson_string else None
 
@@ -214,7 +214,7 @@ def update_database(session, dfo, df_w, current_timestamp):
             ).values(
                 start_date=group['date'].min(),
                 end_date=group['date'].max(),
-                lon_max=float(group['longitude'].max()), 
+                lon_max=float(group['longitude'].max()),
                 lon_min=float(group['longitude'].min()),
                 lat_max=float(group['latitude'].max()),
                 lat_min=float(group['latitude'].min()),
@@ -229,10 +229,10 @@ def update_database(session, dfo, df_w, current_timestamp):
                 wmo=wmo,
                 start_date=group['date'].min(),
                 end_date=group['date'].max(),
-                lon_max=float(group['longitude'].max()), 
+                lon_max=float(group['longitude'].max()),
                 lon_min=float(group['longitude'].min()),
                 lat_max=float(group['latitude'].max()),
-                lat_min=float(group['latitude'].min()),                
+                lat_min=float(group['latitude'].min()),
                 parameters=' '.join(set(' '.join(group['parameters']).split())),
                 data_modes=' '.join(sorted(set(group['parameter_data_mode'].iloc[0]))),
                 geojson=geojson_string,
@@ -244,6 +244,7 @@ with session_scope() as session:
     # Load latest Argo data
     sidx = ArgoIndex(index_file='bgc-s').load()
     dfs = sidx.to_dataframe()
+    dfs = dfs.drop(columns=['file', 'profiler_code', 'institution_code', 'dac'])
 
     dfs = dfs.dropna(subset=['longitude', 'latitude', 'date', 'parameters', 'parameter_data_mode'])
     print("Get data from bgc-s: ", len(dfs))
@@ -252,12 +253,12 @@ with session_scope() as session:
     dfs_unique = dfs_sorted.drop_duplicates(subset=['wmo', 'cyc', 'parameters', 'date'], keep='first')
     assert not dfs_unique.duplicated(subset=['wmo', 'cyc', 'parameters', 'date']).any(), "Duplicates remain after processing!"
 
-    expanded_df = pd.concat([expand_parameters(row) for index, row in dfs_unique.iterrows()]).reset_index(drop=True)
-    print(f"Date range in expanded_df: {expanded_df['date'].min()} to {expanded_df['date'].max()}")
-    print("number of WMO: ", expanded_df['wmo'].nunique())
+    dfo = pd.concat([expand_parameters(row) for index, row in dfs_unique.iterrows()]).reset_index(drop=True)
+    print(f"Date range in expanded_df: {dfo['date'].min()} to {dfo['date'].max()}")
+    print("number of WMO: ", dfo['wmo'].nunique())
 
-    dfo = expanded_df.drop('file', axis=1)
-    df_w = dfs_unique.drop('file', axis=1)
+    #dfo = expanded_df.drop('file', axis=1)
+    df_w = dfs_unique.copy() #drop('file', axis=1)
     df_w.sort_values(by='date', inplace=True)
     # Convert dataframe types before using them in the session
     df_w = df_w.apply(convert_types, axis=1)
