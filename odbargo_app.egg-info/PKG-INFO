@@ -1,8 +1,8 @@
 Metadata-Version: 2.1
 Name: odbargo_app
 Version: 0.0.5
-Requires-Dist: fastapi
-Requires-Dist: uvicorn
+Requires-Dist: fastapi[standard]
+Requires-Dist: uvicorn[standard]
 Requires-Dist: argopy
 Requires-Dist: pydantic
 Requires-Dist: numpy<2.0.0,>=1.26.4

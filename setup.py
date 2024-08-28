@@ -6,8 +6,8 @@ setup(
     packages=find_packages(),
     include_package_data=True,
     install_requires=[
-        "fastapi",
-        "uvicorn",
+        "fastapi[standard]",
+        "uvicorn[standard]",
         "argopy",
         "pydantic",
         "numpy<2.0.0,>=1.26.4"
