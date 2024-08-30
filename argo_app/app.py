@@ -6,6 +6,7 @@ from fastapi.openapi.docs import get_swagger_ui_html
 from fastapi.openapi.utils import get_openapi
 from fastapi.responses import JSONResponse #, ORJSONResponse
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.websockets import WebSocketDisconnect
 import os, tempfile, asyncio, sys #zipfile
 from argo_app.src import config
 from pydantic import BaseModel, Field
@@ -89,17 +90,28 @@ async def test_argo_connection():
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
-    while True:
-        # Wait for any message from the client
-        data = await websocket.receive_text()
-        if data == "subscribe_updates":
-            # Monitor for any updates to send back to the client
-            while True:
-                # Simulating sending an update
-                if config.download_status:
-                    await websocket.send_json({"message":  config.download_status})
-                await asyncio.sleep(1)  # Sleep to simulate waiting for updates
+    try:
+        while True:
+            # Wait for any message from the client
+            data = await websocket.receive_text()
+            if data == "subscribe_updates":
+                # Monitor for any updates to send back to the client
+                while True:
+                    # Simulating sending an update
+                    if config.download_status:
+                        await websocket.send_json({"message":  config.download_status})
+                    await asyncio.sleep(1)  # Sleep to simulate waiting for updates
 
+    except WebSocketDisconnect:
+        print("WebSocket connection was closed.")
+        # Here you can add any cleanup logic if needed
+
+    except Exception as e:
+        print(f"An error occurred while websocket connecting: {str(e)}")
+        # Handle any other exceptions that may occur
+
+    finally:
+        print("WebSocket connection has been properly closed.")
 
 def fetch_and_prepare_nc(wmo_list):
     """Fetching an NC file and saving it locally."""
@@ -121,8 +133,14 @@ def fetch_and_prepare_nc(wmo_list):
         config.download_status = f"Data is ready and available at {nc_path}. Updated: {datetime.now()}"
         print(config.download_status)
 
+    except (ConnectionError, TimeoutError) as e:
+        config.download_status = f"Network Error: {str(e)}"
+        print(config.download_status)
+    except ValueError as e:
+        config.download_status = f"Data Error: {str(e)}"
+        print(config.download_status)
     except Exception as e:
-        config.download_status = f"Error: {str(e)}"
+        config.download_status = f"Unexpected Error: {str(e)}"
         print(config.download_status)
 
 class FloatDownloadRequest(BaseModel):
@@ -140,8 +158,12 @@ async def download_nc_file(background_tasks: BackgroundTasks, float_request: Flo
     - **wmo_list**: A list of WMO identifiers for Argo floats and specified in POST request body.
     """
 
-    background_tasks.add_task(fetch_and_prepare_nc, float_request.wmo_list)
-    return JSONResponse(content={"message": f"Download started at {datetime.now()}, you will be notified when it is ready."})
+    wmo_list = list(set(float_request.wmo_list))
+    background_tasks.add_task(fetch_and_prepare_nc, wmo_list)
+    msg = f"Download {', '.join(str(wmo) for wmo in wmo_list)} started at {datetime.now()}, you will be notified when it is ready."
+    config.download_status = msg
+    print("message: ", msg)
+    return JSONResponse(content={"message": msg})
 
 def main():
     try:

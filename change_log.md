@@ -17,3 +17,4 @@
     -- drop pyproject.toml, use setup.py (python -m build) to fix no entry: No module named argo_app/n3
     -- need uvicorn[standard] to include Websocket after v0.30.6
     -- cancel argo_app app.py zipfile (equal size with .nc file)
+    -- Filter duplicated WMS/add websocket onclose and error handling
