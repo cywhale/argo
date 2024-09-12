@@ -3,7 +3,7 @@
 [Setup]
 AppName=odbargo_app
 AppVersion={#AppVersion}
-DefaultDirName={commonpf}\odbargo_app
+DefaultDirName={commonappdata}\odbargo_app
 DefaultGroupName=odbargo_app
 UninstallDisplayIcon={app}\odbargo_app.ico
 OutputDir=.
