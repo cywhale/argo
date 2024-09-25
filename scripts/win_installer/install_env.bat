@@ -62,7 +62,7 @@ echo Checking if Python is already installed... >> %log_file%
 python --version >> %log_file% 2>&1
 if %ERRORLEVEL% neq 0 (
     echo Python not found. Proceeding with installation... >> %log_file%
-    powershell -Command "Invoke-WebRequest -Uri https://www.python.org/ftp/python/%desired_python_version%/python-%desired_python_version%-amd64.exe -OutFile python_installer.exe" >> %log_file% 2>&1
+    powershell -Command "Invoke-WebRequest -Uri https://www.python.org/ftp/python/%desired_python_version%/python-%desired_python_version%-amd64.exe -OutFile python_installer.exe -TimeoutSec 300" >> %log_file% 2>&1
     if %ERRORLEVEL% neq 0 (
         echo Error downloading Python installer >> %log_file%
         exit /b 1

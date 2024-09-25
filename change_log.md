@@ -18,3 +18,4 @@
     -- need uvicorn[standard] to include Websocket after v0.30.6
     -- cancel argo_app app.py zipfile (equal size with .nc file)
     -- Filter duplicated WMS/add websocket onclose and error handling
+    -- add TIMEOUT for powershell download python installer
