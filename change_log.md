@@ -19,4 +19,4 @@
     -- cancel argo_app app.py zipfile (equal size with .nc file)
     -- Filter duplicated WMS/add websocket onclose and error handling
     -- add TIMEOUT for powershell download python installer
-	-- Change to BITS download python and fallback to web client method/n1
+    -- Change to BITS download python and fallback to web client method/n1, correctly detect result by enabledelayedexpansion/n2

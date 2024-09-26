@@ -11,6 +11,9 @@ OutputBaseFilename=odbargo_app_installer
 DisableDirPage=no
 SetupLogging=yes
 
+[Dirs]
+Name: "{app}\log"; Permissions: everyone-full
+
 [Files]
 Source: "..\..\dist\odbargo_app-{#AppVersion}.tar.gz"; DestDir: "{app}\src"; Flags: ignoreversion
 Source: "python_downloader_bits.ps1"; DestDir: "{app}\src"; Flags: ignoreversion
