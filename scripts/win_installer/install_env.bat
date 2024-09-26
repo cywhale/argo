@@ -62,11 +62,16 @@ echo Checking if Python is already installed... >> %log_file%
 python --version >> %log_file% 2>&1
 if %ERRORLEVEL% neq 0 (
     echo Python not found. Proceeding with installation... >> %log_file%
-    powershell -Command "Invoke-WebRequest -Uri https://www.python.org/ftp/python/%desired_python_version%/python-%desired_python_version%-amd64.exe -OutFile python_installer.exe -TimeoutSec 300" >> %log_file% 2>&1
+    :: Old method: use PowerShell
+	:: powershell -Command "Invoke-WebRequest -Uri https://www.python.org/ftp/python/%desired_python_version%/python-%desired_python_version%-amd64.exe -OutFile python_installer.exe -TimeoutSec 300" >> %log_file% 2>&1
+	
+	:: using BITS (Background Intelligent Transfer Service)
+    powershell -ExecutionPolicy Bypass -File "python_downloader_bits.ps1" -PythonVersion "%desired_python_version%" >> %log_file% 2>&1
     if %ERRORLEVEL% neq 0 (
-        echo Error downloading Python installer >> %log_file%
+        echo Failed to download Python installer. Check %log_file% for details. >> %log_file%
         exit /b 1
     )
+	
     echo Running Python installer... >> %log_file%
     start /wait python_installer.exe /quiet InstallAllUsers=1 PrependPath=1 >> %log_file% 2>&1
     if %ERRORLEVEL% neq 0 (
