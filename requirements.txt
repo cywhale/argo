@@ -1,4 +1,4 @@
-argopy==0.1.16
-fastapi[standard]==0.112.2
-pydantic==2.8.2
-uvicorn[standard]==0.30.6
+argopy==1.0.0
+fastapi[standard]==0.115.6
+pydantic==2.10.3
+uvicorn[standard]==0.32.1
