@@ -1,3 +1,4 @@
+.python-version
 MANIFEST.in
 Pipfile
 odbargo.spec
@@ -22,5 +23,6 @@ odbargo_app.egg-info/top_level.txt
 scripts/win_installer/check_port.bat
 scripts/win_installer/install_env.bat
 scripts/win_installer/install_script.iss
+scripts/win_installer/python_downloader_bits.ps1
 scripts/win_installer/start_odbargo.bat
 scripts/win_installer/uninstall_env.bat

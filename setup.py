@@ -8,7 +8,7 @@ setup(
     install_requires=[
         "fastapi[standard]",
         "uvicorn[standard]",
-        "argopy",
+        "argopy==0.1.17",
         "pydantic",
         "numpy<2.0.0,>=1.26.4"
     ],

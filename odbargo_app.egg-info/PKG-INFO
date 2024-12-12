@@ -3,6 +3,6 @@ Name: odbargo_app
 Version: 0.0.5
 Requires-Dist: fastapi[standard]
 Requires-Dist: uvicorn[standard]
-Requires-Dist: argopy
+Requires-Dist: argopy==0.1.17
 Requires-Dist: pydantic
 Requires-Dist: numpy<2.0.0,>=1.26.4
