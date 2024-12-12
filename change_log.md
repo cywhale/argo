@@ -21,3 +21,4 @@
     -- add TIMEOUT for powershell download python installer
     -- Change to BITS download python and fallback to web client method/n1, correctly detect result by enabledelayedexpansion/n2
     -- package upgrade but argopy1.0.0 still have bug (#412, wait official release)/n1
+	-- Fix window installer for case without python installed
