@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+	  <meta charset="utf-8" />
+	  <title>ODB Argo Application Manual</title>
+	  <meta name="viewport" content="width=device-width,initial-scale=1" />
+      <meta name="description" content="Ocean/Biogeochemical/Argo/API" />
+	  <meta name="author" content="cywhale, Chiyu Weng" />
+    </head>
+<body>
+<div style="margin:10px;padding:5px;">
+<h1 id="-odbargo_app">安裝與使用 odbargo_app</h1>
+<h2 id="-">簡介</h2>
+<p><code>odbargo_app</code> 是生地化 (BGC) Argo 剖面浮標資料下載的一個API本地伺服器，採用了 <a href="https://argopy.readthedocs.io/en/latest/">argopy</a> 功能從 <a href="https://erddap.ifremer.fr/erddap/index.html">ERDDAP</a> 伺服器下載 NetCDF。此應用由 <a href="https://www.odb.ntu.edu.tw/">ODB</a> 開發，並作為在 <a href="https://api.odb.ntu.edu.tw/hub/">Ocean APIverse</a> 平台上與 ODB Argo WMS 圖層整合之 Argo Mapper 擴充模組。更多細節請參考<a href="https://api.odb.ntu.edu.tw/hub/?help=Argo">這裡</a>。<br/><br/>請依照以下步驟安裝 Python、建立虛擬環境，以及設置應用程式。</p>
+<hr>
+<h2 id="-">安裝步驟</h2>
+<h3 id="1-python">1. 安裝 Python</h3>
+<p>若系統尚未安裝 Python：</p>
+<ul>
+<li>請從官方網站下載 Python（建議版本：3.12，最低版本：3.10）：<br><a href="https://www.python.org/downloads/">https://www.python.org/downloads/</a>  </li>
+<li>安裝時請確認勾選以下選項：  <ul>
+<li>Add Python to PATH（將 Python 路徑加入環境變數 PATH）  </li>
+<li>Install for all users（為所有使用者安裝）  </li>
+</ul>
+</li>
+</ul>
+<h3 id="2-">2. 建立虛擬環境</h3>
+<p>為隔離應用程式相依性（非必要但建議使用）：</p>
+<ol>
+<li><p>開啟命令提示字元，執行以下指令：</p>
+<pre><code class="lang-cmd"><span class="hljs-keyword">python</span> -m venv odbargo_env
+</code></pre>
+</li>
+<li><p>啟動虛擬環境：</p>
+<ul>
+<li>在 Windows 上：  <pre><code class="lang-cmd">odbargo_env<span class="hljs-symbol">\S</span>cripts<span class="hljs-symbol">\a</span>ctivate
+</code></pre>
+</li>
+</ul>
+</li>
+<li><p>更新 <code>pip</code> 至最新版本：</p>
+<pre><code class="lang-cmd">python -m pip <span class="hljs-keyword">install</span> <span class="hljs-comment">--upgrade pip</span>
+</code></pre>
+</li>
+</ol>
+<h3 id="3-odbargo_app-">3. 安裝 <code>odbargo_app</code></h3>
+<ol>
+<li><p>從以下網址下載 <code>odbargo_app.tar.gz</code>：<br><a href="https://github.com/cywhale/argo/blob/main/dist/odbargo_app.tar.gz">https://github.com/cywhale/argo/blob/main/dist/odbargo_app.tar.gz</a></p>
+</li>
+<li><p>在啟動的虛擬環境中執行以下指令：</p>
+<pre><code class="lang-cmd">pip <span class="hljs-keyword">install</span> <span class="hljs-keyword">path</span>\<span class="hljs-keyword">to</span>\odbargo_app.tar.gz
+</code></pre>
+</li>
+<li><p>安裝成功後啟動應用：</p>
+<pre><code class="lang-cmd">odbargo_app
+</code></pre>
+</li>
+</ol>
+</div>
+</body>
+</html>

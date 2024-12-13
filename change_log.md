@@ -25,3 +25,4 @@
     -- Fixed argopy==0.1.17 (wait argopy1.0.0 bug fixation official release)/n2 
     -- try to use fixed requirements.txt in odbargo_app istallation (wait argopy1.0.0 bugfix releas)/n3
 	-- add requirement.txt into window installer/n4
+	-- add Installation guide in README.md/html
