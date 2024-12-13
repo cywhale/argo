@@ -6,10 +6,10 @@ setup(
     packages=find_packages(),
     include_package_data=True,
     install_requires=[
-        "fastapi[standard]",
-        "uvicorn[standard]",
+        "fastapi[standard]<=0.115.6",
+        "uvicorn[standard]<=0.32.1",
         "argopy==0.1.17",
-        "pydantic",
+        "pydantic<=2.10.3",
         "numpy<2.0.0,>=1.26.4"
     ],
     entry_points={
