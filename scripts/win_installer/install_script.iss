@@ -15,6 +15,7 @@ SetupLogging=yes
 Name: "{app}\log"; Permissions: everyone-full
 
 [Files]
+Source: "..\..\dist\requirements.txt"; DestDir: "{app}\src"; Flags: ignoreversion
 Source: "..\..\dist\odbargo_app.tar.gz"; DestDir: "{app}\src"; Flags: ignoreversion
 Source: "python_downloader_bits.ps1"; DestDir: "{app}\src"; Flags: ignoreversion
 Source: "install_env.bat"; DestDir: "{app}\src"; Flags: ignoreversion

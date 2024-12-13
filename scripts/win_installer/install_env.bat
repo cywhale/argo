@@ -167,6 +167,7 @@ goto install_app
 :: Function to install %~dp0\odbargo_app-%app_version%.tar.gz
 :install_app
 echo Installing odbargo_app... >> %log_file% 2>&1
+"%python_path%" -m pip install -r %~dp0\requirements.txt >> %log_file% 2>&1
 "%python_path%" -m pip install %~dp0\odbargo_app.tar.gz >> %log_file% 2>&1
 
 if %ERRORLEVEL% neq 0 (
