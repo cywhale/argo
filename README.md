@@ -9,7 +9,7 @@
 
 ### 1. Install Python  
 If Python is not installed on your system:  
-- Download Python (recommended version: 3.12, minimum version: 3.10) from the official Python website:  
+- Download Python (*recommended version: 3.12, minimum version: 3.10*) from the official Python website:  
   https://www.python.org/downloads/  
 - During installation, ensure the following options are checked:  
   - Add Python to PATH  
@@ -43,7 +43,7 @@ To isolate the app's dependencies (*Optional but recommended*):
    pip install path\to\odbargo_app.tar.gz
    ```  
 
-3. Start the application after installation:  
+3. Start the application after installation (*in virtual environment if it exists*):  
    ```cmd
    odbargo_app
    ```  
