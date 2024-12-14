@@ -10,14 +10,14 @@
 
 ### 1. 安裝 Python  
 若系統尚未安裝 Python：  
-- 請從官方網站下載 Python（建議版本：3.12，最低版本：3.10）：  
+- 請從官方網站下載 Python（*建議版本：3.12，最低版本：3.10*）：  
   https://www.python.org/downloads/  
 - 安裝時請確認勾選以下選項：  
   - Add Python to PATH（將 Python 路徑加入環境變數 PATH）  
   - Install for all users（為所有使用者安裝）  
 
 ### 2. 建立虛擬環境  
-為隔離應用程式相依性（非必要但建議使用）：  
+為隔離應用程式相依性（*非必要但建議使用*）：  
 
 1. 開啟命令提示字元，執行以下指令：  
    ```cmd
@@ -44,7 +44,7 @@
    pip install path\to\odbargo_app.tar.gz
    ```  
 
-3. 安裝成功後啟動應用：  
+3. 安裝成功後啟動應用（*若有虛擬環境需先啟動該環境*）：  
    ```cmd
    odbargo_app
    ```  
