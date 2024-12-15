@@ -1,6 +1,5 @@
-import os, argopy
+from argopy import ArgoIndex, ArgoNVSReferenceTables
 from datetime import datetime, timezone
-from argopy import ArgoIndex
 from sqlalchemy import create_engine, func, update, Index, Column, Integer, Float, TEXT, TIMESTAMP, ForeignKey
 from sqlalchemy.orm import declarative_base, sessionmaker, scoped_session, relationship
 from sqlalchemy.pool import NullPool
@@ -8,9 +7,10 @@ from sqlalchemy.dialects.postgresql import insert, JSONB
 from geoalchemy2 import WKTElement, Geometry
 from geoalchemy2.shape import from_shape
 from shapely.geometry import LineString
+import argopy
 import pandas as pd
 import numpy as np
-import geojson
+import geojson, os
 from urllib.parse import quote 
 from dotenv import load_dotenv
 from contextlib import contextmanager
@@ -20,6 +20,14 @@ ocean_full_names = {
     'I': 'Indian Ocean Area',
     'P': 'Pacific Ocean Area'
 }
+
+profilerRef = ArgoNVSReferenceTables().tbl('R08')
+profiler_mapping = profilerRef.set_index('altLabel')['prefLabel'].to_dict()
+# profiler_mapping = {
+#     int(k): v
+#     for k, v in profilerRef.set_index('altLabel')['prefLabel'].to_dict().items()
+#     if str(k).strip().isdigit()  # Ensure the key is numeric
+# }
 
 def expand_parameters(row):
     parameters = row['parameters'].split()
@@ -244,6 +252,11 @@ with session_scope() as session:
     # Load latest Argo data
     sidx = ArgoIndex(index_file='bgc-s').load()
     dfs = sidx.to_dataframe()
+
+    # replace Unknown profiler with R08 reference table
+    dfs['profiler'] = dfs['profiler_code'].astype(str).map(profiler_mapping).fillna('Unknown') 
+    print("Try to replace Unknown profiler: ",dfs[["profiler_code", "profiler"]].drop_duplicates())
+
     dfs = dfs.drop(columns=['file', 'profiler_code', 'institution_code', 'dac'])
 
     dfs = dfs.dropna(subset=['longitude', 'latitude', 'date', 'parameters', 'parameter_data_mode'])
