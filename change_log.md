@@ -27,3 +27,4 @@
 	-- add requirement.txt into window installer/n4
 	-- add Installation guide in README.md/html
 	-- Fix profiler all Unknown problem by using R08 reference table in argopy
+	-- Research example of WMO690084 (Black Sea, O2 profile)
