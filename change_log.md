@@ -28,3 +28,5 @@
 	-- add Installation guide in README.md/html
 	-- Fix profiler all Unknown problem by using R08 reference table in argopy
 	-- Research example of WMO690084 (Black Sea, O2 profile)
+
+#### ver 0.0.6 move to argopy 1.1.0 before adding mcp

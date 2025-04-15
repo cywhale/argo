@@ -1,6 +1,8 @@
 .python-version
 MANIFEST.in
 Pipfile
+README.html
+README_tw.html
 odbargo.spec
 requirements.txt
 setup.py

@@ -253,8 +253,8 @@ with session_scope() as session:
     sidx = ArgoIndex(index_file='bgc-s').load()
     dfs = sidx.to_dataframe()
 
-    # replace Unknown profiler with R08 reference table
-    dfs['profiler'] = dfs['profiler_code'].astype(str).map(profiler_mapping).fillna('Unknown') 
+    # replace Unknown profiler with R08 reference table before argopy v1.1.0 (fix at v1.1.0)
+    # dfs['profiler'] = dfs['profiler_code'].astype(str).map(profiler_mapping).fillna('Unknown') 
     print("Try to replace Unknown profiler: ",dfs[["profiler_code", "profiler"]].drop_duplicates())
 
     dfs = dfs.drop(columns=['file', 'profiler_code', 'institution_code', 'dac'])

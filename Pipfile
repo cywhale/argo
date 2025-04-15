@@ -5,10 +5,10 @@ name = "pypi"
 
 [packages]
 gunicorn = "==22.0.0"
-argopy = "==1.0.0"
-fastapi = {extras = ["standard"], version = "==0.115.5"}
-pydantic = "==2.10.1"
-uvicorn = {extras = ["standard"], version = "==0.32.1"}
+argopy = "==1.1.0"
+pydantic = "==2.11.3"
+fastapi = {extras = ["standard"], version = "==0.115.12"}
+uvicorn = {extras = ["standard"], version = "==0.34.1"}
 
 [dev-packages]
 

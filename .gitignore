@@ -39,3 +39,4 @@ node_modules
 **/src.egg-info
 **/*.mat
 **/*.exe
+**/.python-version

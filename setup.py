@@ -2,14 +2,14 @@ from setuptools import setup, find_packages
 
 setup(
     name="odbargo_app",
-    version="0.0.5",
+    version="0.0.6",
     packages=find_packages(),
     include_package_data=True,
     install_requires=[
-        "fastapi[standard]<=0.115.6",
-        "uvicorn[standard]<=0.32.1",
-        "argopy==0.1.17",
-        "pydantic<=2.10.3",
+        "fastapi[standard]<=0.115.12",
+        "uvicorn[standard]<=0.34.1",
+        "argopy==1.1.0",
+        "pydantic<=2.11.3",
         "numpy<2.0.0,>=1.26.4"
     ],
     entry_points={
