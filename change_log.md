@@ -30,3 +30,5 @@
 	-- Research example of WMO690084 (Black Sea, O2 profile)
 
 #### ver 0.0.6 move to argopy 1.1.0 before adding mcp
+
+#### ver 0.0.7 mcp server trial/n1

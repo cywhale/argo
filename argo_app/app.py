@@ -15,10 +15,25 @@ from contextlib import asynccontextmanager
 from datetime import datetime # timedelta
 import uvicorn
 import warnings
+import asyncio
+import argparse
+import sys
+
+# Optional MCP mode
+try:
+    import fastapi_mcp
+    from fastapi_mcp import FastApiMCP
+except ImportError:
+    fastapi_mcp = None
+    print("Warning: fastapi-mcp not installed.", file=sys.stderr)
+
+from argo_app.src import config
 
 warnings.filterwarnings("ignore", category=FutureWarning, message="The return type of `Dataset.dims` will be changed")
 # from dask.distributed import Client
 # client = Client('tcp://localhost:8786')
+
+websocket_connected = False
 
 def generate_custom_openapi():
     if app.openapi_schema:
@@ -52,7 +67,6 @@ async def lifespan(app: FastAPI):
     if not os.path.exists(config.outputPath):
         os.makedirs(config.outputPath)
     print(f"APP start at {datetime.now()}, set cache at: {cache_dir}, output at: {config.outputPath}") 
-
     yield
     # below code to execute when app is shutting down
     print(f"APP end at {datetime.now()}...")
@@ -60,7 +74,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     lifespan=lifespan, docs_url=None
-)  # , default_response_class=ORJSONResponse)
+) 
 
 app.add_middleware(
     CORSMiddleware,
@@ -75,13 +89,13 @@ async def custom_openapi():
     return JSONResponse(generate_custom_openapi())
 
 
-@app.get("/argo/api/swagger", include_in_schema=False)
+@app.get("/argo/api/swagger", include_in_schema=False, operation_id="get_swagger")
 async def custom_swagger_ui_html():
     return get_swagger_ui_html(
         openapi_url="/argo/api/swagger/openapi.json", title=app.title
     )
 
-@app.get("/argo/api/test", tags=["Test"], summary="Test Argo operations")
+@app.get("/argo/api/test", tags=["Test"], summary="Test Argo operations", operation_id="get_test")
 async def test_argo_connection():
     config.download_status = "Success: message transmitted ok."
     return {"success": "ok"}
@@ -150,7 +164,7 @@ class FloatDownloadRequest(BaseModel):
         example=[5903377, 5903594]
     )
 
-@app.post("/argo/api/floats/download/", tags=["Argo"], summary="Download Argo floats NetCDF")
+@app.post("/argo/api/floats/download/", tags=["Argo"], summary="Download Argo floats NetCDF", operation_id="get_data")
 async def download_nc_file(background_tasks: BackgroundTasks, float_request: FloatDownloadRequest):
     """
     Initiates a background task to download NetCDF files for specified Argo floats.
@@ -165,18 +179,76 @@ async def download_nc_file(background_tasks: BackgroundTasks, float_request: Flo
     print("message: ", msg)
     return JSONResponse(content={"message": msg})
 
+@app.get("/argo/api/status", tags=["Argo"], summary="Download status", operation_id="get_status")
+async def get_status():
+    """
+    Get Argo NetCDF file download status.
+    """
+    return {"status": config.download_status, "timestamp": datetime.now()}
+
+# def run_mcp_server():
+#    """Mount MCP server on separate port"""
+if fastapi_mcp:
+    mcp = FastApiMCP(
+            app,
+            name="Local Argo MCP server",
+            description="MCP server for local Argo data processing",
+            base_url=f"http://localhost:{config.mcp_port}",
+    )
+    mcp.mount()
+    print(f"MCP server mounted on port {config.mcp_port} (JSON-RPC)")
+else:
+    print("fastapi_mcp not installed, MCP support unavailable.")
+
+async def cli_interactive_mode():
+    """Fallback CLI interaction mode"""
+    print("\n🟡 Entering CLI fallback mode. Type natural language to get Argo data (type 'exit' to quit):")
+    while True:
+        query = input(">>> ").strip()
+        if query.lower() == "exit":
+            print("Goodbye.")
+            break
+        query_wmo = ''.join([c if c.isdigit() or c == ',' else '' for c in query])
+        wmo_list = [int(x) for x in query_wmo.split(',') if x.strip().isdigit()]
+        if wmo_list:
+            print(f"🔍 Downloading Argo data for WMO(s): {wmo_list}\n")
+            fetch_and_prepare_nc(wmo_list)
+        else:
+            print("⚠️  No valid WMO IDs found in input. Please try again.\n")
+
+async def wait_for_enter_to_start_cli(timeout=5):
+    """Wait for user to press Enter to start CLI mode"""
+    try:
+        await asyncio.wait_for(asyncio.to_thread(input, "\nPress Enter to enter CLI fallback mode...\n"), timeout)
+        await cli_interactive_mode()
+    except asyncio.TimeoutError:
+        print("🟢 Frontend not detected. Entering CLI fallback mode.")
+        await cli_interactive_mode()
+
 def main():
     try:
-        port = int(sys.argv[1]) if len(sys.argv) > 1 else config.default_port
-        if not (1024 < port < 65535):
+        parser = argparse.ArgumentParser(description="ODB Argo App - Run server with optional MCP/CLI fallback.")
+        parser.add_argument("port", type=int, nargs='?', default=config.default_port, help=f"Port for HTTP server (default: {config.default_port})")
+        args = parser.parse_args()
+        if not (1024 < args.port < 65535):
             raise ValueError("Port number must be between 1024 and 65535")
     except (ValueError, IndexError) as e:
         print(f"Invalid or missing port number: {e}")
         sys.exit(1)
 
-    config.default_port = port
-    print("Odbargo running on port: ", config.default_port)
-    uvicorn.run("argo_app.app:app", host="127.0.0.1", port=port, log_level="info")
+    config.default_port = args.port
+    config.mcp_port = args.port + 1
+    print("Odbargo running on port: ", config.default_port, " and MCP port: ", config.mcp_port)
+    # uvicorn.run("argo_app.app:app", host="127.0.0.1", port=port, log_level="info")
+
+    import threading
+    threading.Thread(target=lambda: uvicorn.run("argo_app.app:app", host="127.0.0.1", port=config.default_port, log_level="info")).start()
+
+    print("⌛ Waiting for frontend WebSocket connection... (press Enter to start CLI mode manually)")
+    try:
+        asyncio.run(wait_for_enter_to_start_cli())
+    except KeyboardInterrupt:
+        print("\n🟥 Interrupted. Exiting.")
 
 if __name__ == "__main__":
     main()
