@@ -7,6 +7,7 @@ from fastapi.openapi.utils import get_openapi
 from fastapi.responses import JSONResponse #, ORJSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.websockets import WebSocketDisconnect
+from fastapi_mcp import FastApiMCP
 import os, tempfile, asyncio, sys #zipfile
 from argo_app.src import config
 from pydantic import BaseModel, Field
@@ -18,22 +19,22 @@ import warnings
 import asyncio
 import argparse
 import sys
+from argo_app.src import config
 
 # Optional MCP mode
-try:
-    import fastapi_mcp
-    from fastapi_mcp import FastApiMCP
-except ImportError:
-    fastapi_mcp = None
-    print("Warning: fastapi-mcp not installed.", file=sys.stderr)
-
-from argo_app.src import config
+# try:
+#     import fastapi_mcp
+#     from fastapi_mcp import FastApiMCP
+# except ImportError:
+#     fastapi_mcp = None
+#     print("Warning: fastapi-mcp not installed.", file=sys.stderr)
 
 warnings.filterwarnings("ignore", category=FutureWarning, message="The return type of `Dataset.dims` will be changed")
 # from dask.distributed import Client
 # client = Client('tcp://localhost:8786')
 
 websocket_connected = False
+download_counter = 0 # Internal download counter
 
 def generate_custom_openapi():
     if app.openapi_schema:
@@ -129,10 +130,20 @@ async def websocket_endpoint(websocket: WebSocket):
 
 def fetch_and_prepare_nc(wmo_list):
     """Fetching an NC file and saving it locally."""
+    global download_counter
     try:
         # Assume fetch_nc_data handles downloading and returns the path to the fetched data
         config.ds = DataFetcher(ds='bgc', mode='expert', src='erddap', params='all', parallel=True).float(wmo_list).to_xarray()
-        nc_path = os.path.join(config.outputPath, 'argo_data.nc')
+
+        # Create unique filename
+        download_counter += 1
+        first_wmo = wmo_list[0]
+        if len(wmo_list) == 1:
+            nc_filename = f"argo_data_wmo{first_wmo}_{download_counter}.nc"
+        else:
+            nc_filename = f"argo_data_wmo{first_wmo}_etc_{download_counter}.nc"
+
+        nc_path = os.path.join(config.outputPath, nc_filename)
         config.ds.to_netcdf(nc_path)
         # profile_path = os.path.join(config.outputPath, 'argo_profiles.nc')
         # config.ds.argo.point2profile().to_netcdf(profile_path)
@@ -188,17 +199,16 @@ async def get_status():
 
 # def run_mcp_server():
 #    """Mount MCP server on separate port"""
-if fastapi_mcp:
-    mcp = FastApiMCP(
-            app,
-            name="Local Argo MCP server",
-            description="MCP server for local Argo data processing",
-            base_url=f"http://localhost:{config.mcp_port}",
+# if fastapi_mcp:
+mcp = FastApiMCP(
+        app,
+        name="Local Argo MCP server",
+        description="MCP server for local Argo data processing",
+        base_url=f"http://localhost:{config.mcp_port}",
     )
-    mcp.mount()
-    print(f"MCP server mounted on port {config.mcp_port} (JSON-RPC)")
-else:
-    print("fastapi_mcp not installed, MCP support unavailable.")
+mcp.mount()
+# else:
+#     print("fastapi_mcp not installed, MCP support unavailable.")
 
 async def cli_interactive_mode():
     """Fallback CLI interaction mode"""

@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+	  <meta charset="utf-8" />
+	  <title>ODB Argo Application Manual</title>
+	  <meta name="viewport" content="width=device-width,initial-scale=1" />
+      <meta name="description" content="Ocean/Biogeochemical/Argo/API" />
+	  <meta name="author" content="cywhale, Chiyu Weng" />
+    </head>
+<body>
+<div style="margin:10px;padding:5px;">
+<h1 id="install-and-use-odbargo_app">Install and Use odbargo_app</h1>
+<h2 id="introduction">Introduction</h2>
+<p><code>odbargo_app</code> is a local API server for downloading Biogeochemical (BGC) Argo float data (NetCDF) from the <a href="https://erddap.ifremer.fr/erddap/index.html">ERDDAP</a> server using <a href="https://argopy.readthedocs.io/en/latest/">argopy</a> functions. This application is developed by <a href="https://www.odb.ntu.edu.tw/">ODB</a> and serves as an Argo Mapper plugin to integrate with the ODB Argo WMS layer on the web platform <a href="https://api.odb.ntu.edu.tw/hub/">Ocean APIverse</a>. Visit it for more <a href="https://api.odb.ntu.edu.tw/hub/?help=Argo">details</a>.<br/><br/>Follow the steps below to install Python, create a virtual environment, and set up the application.</p>
+<hr>
+<h2 id="installation-steps">Installation Steps</h2>
+<h3 id="1-install-python">1. Install Python</h3>
+<p>If Python is not installed on your system:</p>
+<ul>
+<li>Download Python (<em>recommended version: 3.12, minimum version: 3.10</em>) from the official Python website:<br><a href="https://www.python.org/downloads/">https://www.python.org/downloads/</a>  </li>
+<li>During installation, ensure the following options are checked:  <ul>
+<li>Add Python to PATH  </li>
+<li>Install for all users  </li>
+</ul>
+</li>
+</ul>
+<h3 id="2-create-a-virtual-environment">2. Create a Virtual Environment</h3>
+<p>To isolate the app&#39;s dependencies (<em>Optional but recommended</em>):</p>
+<ol>
+<li><p>Open a command prompt and run:</p>
+<pre><code class="lang-cmd"><span class="hljs-keyword">python</span> -m venv odbargo_env
+</code></pre>
+</li>
+<li><p>Activate the virtual environment:</p>
+<ul>
+<li>On Windows:  <pre><code class="lang-cmd">odbargo_env<span class="hljs-symbol">\S</span>cripts<span class="hljs-symbol">\a</span>ctivate
+</code></pre>
+</li>
+</ul>
+</li>
+<li><p>Update <code>pip</code> to the latest version:</p>
+<pre><code class="lang-cmd">python -m pip <span class="hljs-keyword">install</span> <span class="hljs-comment">--upgrade pip</span>
+</code></pre>
+</li>
+</ol>
+<h3 id="3-install-odbargo_app-">3. Install <code>odbargo_app</code></h3>
+<ol>
+<li><p>Download the <code>odbargo_app.tar.gz</code> file from:<br><a href="https://github.com/cywhale/argo/blob/main/dist/odbargo_app.tar.gz">https://github.com/cywhale/argo/blob/main/dist/odbargo_app.tar.gz</a></p>
+</li>
+<li><p>Run the following command in the activated virtual environment:</p>
+<pre><code class="lang-cmd">pip <span class="hljs-keyword">install</span> <span class="hljs-keyword">path</span>\<span class="hljs-keyword">to</span>\odbargo_app.tar.gz
+</code></pre>
+</li>
+<li><p>Start the application after installation (<em>in virtual environment if it exists</em>):</p>
+<pre><code class="lang-cmd">odbargo_app
+</code></pre>
+</li>
+</ol>
+</div>
+</body>
+</html>

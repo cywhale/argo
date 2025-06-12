@@ -1,49 +1,75 @@
-# Install and Use odbargo_app
+# Install and Use odbargo-cli
 
 ## Introduction  
-`odbargo_app` is a local API server for downloading Biogeochemical (BGC) Argo float data (NetCDF) from the [ERDDAP](https://erddap.ifremer.fr/erddap/index.html) server using [argopy](https://argopy.readthedocs.io/en/latest/) functions. This application is developed by [ODB](https://www.odb.ntu.edu.tw/) and serves as an Argo Mapper plugin to integrate with the ODB Argo WMS layer on the web platform [Ocean APIverse](https://api.odb.ntu.edu.tw/hub/). Visit it for more [details](https://api.odb.ntu.edu.tw/hub/?help=Argo). Follow the steps below to install Python, create a virtual environment, and set up the application.  
+`odbargo-cli` is a lightweight command-line tool designed to download Biogeochemical (BGC) Argo float data from the [ERDDAP](https://erddap.ifremer.fr/erddap/index.html) server using [argopy](https://argopy.readthedocs.io/en/latest/).
+It is developed by [ODB](https://www.odb.ntu.edu.tw/) as a backend companion for the ODB Argo Mapper plugin in [Ocean APIverse](https://api.odb.ntu.edu.tw/hub/), and also supports standalone interactive use.
 
----  
+---
 
-## Installation Steps  
+## Usage
 
-### 1. Install Python  
-If Python is not installed on your system:  
-- Download Python (*recommended version: 3.12, minimum version: 3.10*) from the official Python website:  
-  https://www.python.org/downloads/  
-- During installation, ensure the following options are checked:  
-  - Add Python to PATH  
-  - Install for all users  
+### 1. Download
 
-### 2. Create a Virtual Environment  
-To isolate the app's dependencies (*Optional but recommended*):  
+You can either:
 
-1. Open a command prompt and run:  
-   ```cmd
-   python -m venv odbargo_env
-   ```  
+- **Download the source**: [`odbargo-cli.py`](./odbargo-cli.py)
+- **Use prebuilt binaries** (if available for your platform):  
+  - Windows: [`odbargo-cli.exe`](https://your-download-url)
+  - Linux: [`odbargo-cli`](https://your-download-url)
 
-2. Activate the virtual environment:  
-   - On Windows:  
-     ```cmd
-     odbargo_env\Scripts\activate
-     ```  
+### 2. Run the CLI
 
-3. Update `pip` to the latest version:  
-   ```cmd
-   python -m pip install --upgrade pip
-   ```  
+You can run it as a background websocket server + interactive prompt:
+*--port is optional, default port is 8765*
 
-### 3. Install `odbargo_app`  
-1. Download the `odbargo_app.tar.gz` file from:  
-   https://github.com/cywhale/argo/blob/main/dist/odbargo_app.tar.gz  
+```bash
+python odbargo-cli.py --port 8765
+```
 
-2. Run the following command in the activated virtual environment:  
-   ```cmd
-   pip install path\to\odbargo_app.tar.gz
-   ```  
+Or, if using a compiled binary:
 
-3. Start the application after installation (*in virtual environment if it exists*):  
-   ```cmd
-   odbargo_app
-   ```  
+```bash
+./odbargo-cli.exe --port 8765    # Windows
+./odbargo-cli --port 8765        # Linux/macOS
+```
+
+You will see:
+
+```
+[Argo-CLI] WebSocket listening on ws://localhost:8765
+🟡 CLI interactive mode. Type WMO list (comma separated) or 'exit':
+>>>
+```
+
+---
+
+### 3. Options
+
+* **Interactive mode**:
+  Type WMO float numbers like:
+
+  ```
+  >>> 5903377, 5903594
+  ```
+
+  The tool will fetch and save NetCDF files into a temporary directory.
+
+#### Notes on Slow Networks
+
+* Large WMO groups cause a huge NetCDF to download which may timeout in poor network conditions.
+* The CLI retries **3 times with 10-second intervals** if a download fails.
+* It's recommended to fetch ≤ 3 WMOs at a time on slow connections.
+
+#### Frontend-connected mode
+  If the [Ocean APIverse](https://api.odb.ntu.edu.tw/hub/settings) > Options > Plugin > Enable OdbArgo detects this tool running locally, it will communicate via `ws://localhost:8765` to trigger downloads directly.
+
+  Use ODB [Argofloats WMS layer](https://api.odb.ntu.edu.tw/hub/earth/settings?ogcurl=https://ecodata.odb.ntu.edu.tw/geoserver/odbargo/wms&service=WMS&layer=argofloats) directly on Ocean APIverse.
+
+---
+
+## Support
+
+For Argofloats WMS layer integration, visit [Ocean APIverse with Argo Mapper](https://api.odb.ntu.edu.tw/hub/earth/settings?ogcurl=https://ecodata.odb.ntu.edu.tw/geoserver/odbargo/wms&service=WMS&layer=argofloats) or contact me.
+
+---
+

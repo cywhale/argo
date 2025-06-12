@@ -1,0 +1,38 @@
+#!/bin/bash
+# build_cli.sh
+# pip install pyinstaller
+
+# Create version file
+cat > version.txt << EOF
+# UTF-8
+VSVersionInfo(
+  ffi=FixedFileInfo(
+    filevers=(1,0,0,0),
+    prodvers=(1,0,0,0),
+    mask=0x3f,
+    flags=0x0,
+    OS=0x4,
+    fileType=0x1,
+    subtype=0x0,
+    date=(0, 0)
+  ),
+  kids=[
+    StringFileInfo([
+      StringTable('040904B0', [
+        StringStruct('CompanyName', 'Ocean Data Bank (ODB), Taiwan'),
+        StringStruct('FileDescription', 'ODB Argo Ocean Data Downloader CLI'),
+        StringStruct('FileVersion', '1.0.0.0'),
+        StringStruct('ProductName', 'ODB Argo CLI'),
+        StringStruct('ProductVersion', '1.0.0.0')])
+    ]),
+    VarFileInfo([VarStruct('Translation', [1033, 1200])])
+  ]
+)
+EOF
+
+pyinstaller \
+  --onefile \
+  --name odbargo-cli \
+  --version-file version.txt \
+  --add-data "README.md:README.md" \
+  odbargo-cli.py

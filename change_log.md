@@ -30,5 +30,7 @@
 	-- Research example of WMO690084 (Black Sea, O2 profile)
 
 #### ver 0.0.6 move to argopy 1.1.0 before adding mcp
+        -- mcp server trial/n1/deprecated: 20250610
 
-#### ver 0.0.7 mcp server trial/n1
+#### ver 0.1.0 odbargo-cli: lightweight CLI deprecate FastAPI, argopy/milestone/n1
+
