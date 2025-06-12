@@ -1,8 +1,8 @@
 # Install and Use odbargo-cli
 
 ## Introduction  
-`odbargo-cli` is a lightweight command-line tool designed to download Biogeochemical (BGC) Argo float data from the [ERDDAP](https://erddap.ifremer.fr/erddap/index.html) server using [argopy](https://argopy.readthedocs.io/en/latest/).
-It is developed by [ODB](https://www.odb.ntu.edu.tw/) as a backend companion for the ODB Argo Mapper plugin in [Ocean APIverse](https://api.odb.ntu.edu.tw/hub/), and also supports standalone interactive use.
+`odbargo-cli` is a lightweight command-line tool designed to download Biogeochemical (BGC) Argo float data (NetCDF) from the [ERDDAP](https://erddap.ifremer.fr/erddap/index.html) server.
+It is developed by [ODB](https://www.odb.ntu.edu.tw/) as a Argo plugin in ODB [Ocean APIverse](https://api.odb.ntu.edu.tw/hub/), and also supports standalone interactive use.  Visit it for more [details](https://api.odb.ntu.edu.tw/hub/?help=Argo) about the integration with Ocean APIverse . 
 
 ---
 
@@ -15,8 +15,7 @@ You can either:
 - **Download the source**: [`odbargo-cli.py`](https://raw.githubusercontent.com/cywhale/argo/refs/heads/main/odbargo-cli.py)
 - **Use prebuilt binaries** (if available for your platform):  
   - Windows: [`odbargo-cli.exe`](https://github.com/cywhale/argo/blob/main/dist/win_cli/odbargo-cli.exe)
-    *if the .exe blocked by Windows Defedner, try alternative version: [`odbargo-cli`](https://github.com/cywhale/argo/blob/main/dist/win_cli/odbargo-cli)* 
-  - Linux: [`odbargo-cli`](https://github.com/cywhale/argo/blob/main/dist/linux_cli/odbargo-cli.exe)
+  - Linux: [`odbargo-cli`](https://github.com/cywhale/argo/blob/main/dist/linux_cli/odbargo-cli)
 
 ### 2. Run the CLI
 

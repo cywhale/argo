@@ -34,4 +34,5 @@
 
 #### ver 0.1.0 odbargo-cli: lightweight CLI deprecate FastAPI, argopy/milestone/n1
         -- try a windows executive
+		-- prepare documentation in markdown/html
 

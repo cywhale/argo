@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+	  <meta charset="utf-8" />
+	  <title>ODB Argo CLI Tool Manual</title>
+	  <meta name="viewport" content="width=device-width,initial-scale=1" />
+      <meta name="description" content="Ocean/Biogeochemical/Argo/API" />
+	  <meta name="author" content="cywhale, Chiyu Weng" />
+    </head>
+<body>
+<div style="margin:10px;padding:5px;">
+<h1 id="install-and-use-odbargo-cli">Install and Use odbargo-cli</h1>
+<h2 id="introduction">Introduction</h2>
+<p><code>odbargo-cli</code> is a lightweight command-line tool designed to download Biogeochemical (BGC) Argo float data (NetCDF) from the <a href="https://erddap.ifremer.fr/erddap/index.html">ERDDAP</a> server.
+It is developed by <a href="https://www.odb.ntu.edu.tw/">ODB</a> as a Argo plugin in ODB <a href="https://api.odb.ntu.edu.tw/hub/">Ocean APIverse</a>, and also supports standalone interactive use.  Visit it for more <a href="https://api.odb.ntu.edu.tw/hub/?help=Argo">details</a> about the integration with Ocean APIverse . </p>
+<hr>
+<h2 id="usage">Usage</h2>
+<h3 id="1-download">1. Download</h3>
+<p>You can either:</p>
+<ul>
+<li><strong>Download the source</strong>: <a href="https://raw.githubusercontent.com/cywhale/argo/refs/heads/main/odbargo-cli.py"><code>odbargo-cli.py</code></a></li>
+<li><strong>Use prebuilt binaries</strong> (if available for your platform):  <ul>
+<li>Windows: <a href="https://github.com/cywhale/argo/blob/main/dist/win_cli/odbargo-cli.exe"><code>odbargo-cli.exe</code></a></li>
+<li>Linux: <a href="https://github.com/cywhale/argo/blob/main/dist/linux_cli/odbargo-cli"><code>odbargo-cli</code></a></li>
+</ul>
+</li>
+</ul>
+<h3 id="2-run-the-cli">2. Run the CLI</h3>
+<p>You can run it as a background websocket server + interactive prompt:
+<em>--port is optional, default port is 8765</em></p>
+<pre><code class="lang-bash">python odbargo-cli<span class="hljs-selector-class">.py</span> --port <span class="hljs-number">8765</span>
+</code></pre>
+<p>Or, if using a compiled binary:</p>
+<pre><code class="lang-bash">./odbargo-<span class="hljs-keyword">cli</span>.exe --port <span class="hljs-number">8765</span>    <span class="hljs-meta"># Windows</span>
+./odbargo-<span class="hljs-keyword">cli</span> --port <span class="hljs-number">8765</span>        <span class="hljs-meta"># Linux/macOS</span>
+</code></pre>
+<p>You will see:</p>
+<pre><code>[Argo-<span class="hljs-keyword">CLI</span>] WebSocket listening <span class="hljs-keyword">on</span> ws:<span class="hljs-comment">//localhost:8765</span>
+🟡 <span class="hljs-keyword">CLI</span> interactive mode. <span class="hljs-keyword">Type</span> WMO <span class="hljs-keyword">list</span> (comma separated) or '<span class="hljs-keyword">exit</span>':
+&gt;&gt;&gt;
+</code></pre><hr>
+<h3 id="3-options">3. Options</h3>
+<ul>
+<li><p><strong>Interactive mode</strong>:
+Type WMO float numbers like:</p>
+<pre><code>&gt;&gt;&gt; <span class="hljs-number">5903377</span>, <span class="hljs-number">5903594</span>
+</code></pre><p>The tool will fetch and save NetCDF files into a temporary directory.</p>
+</li>
+</ul>
+<h4 id="notes-on-slow-networks">Notes on Slow Networks</h4>
+<ul>
+<li>Large WMO groups cause a huge NetCDF to download which may timeout in poor network conditions.</li>
+<li>The CLI retries <strong>3 times with 10-second intervals</strong> if a download fails.</li>
+<li>It&#39;s recommended to fetch ≤ 3 WMOs at a time on slow connections.</li>
+</ul>
+<h4 id="frontend-connected-mode">Frontend-connected mode</h4>
+<p>  If the <a href="https://api.odb.ntu.edu.tw/hub/settings">Ocean APIverse</a> &gt; Options &gt; Plugin &gt; Enable OdbArgo detects this tool running locally, it will communicate via <code>ws://localhost:8765</code> to trigger downloads directly.</p>
+<p>  Use ODB <a href="https://api.odb.ntu.edu.tw/hub/earth/settings?ogcurl=https://ecodata.odb.ntu.edu.tw/geoserver/odbargo/wms&amp;service=WMS&amp;layer=argofloats">Argofloats WMS layer</a> directly on Ocean APIverse.</p>
+</div>
+</body>
+</html>
