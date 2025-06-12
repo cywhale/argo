@@ -38,5 +38,5 @@ node_modules
 **/*.nc
 **/src.egg-info
 **/*.mat
-**/*.exe
 **/.python-version
+**/scripts/win_installer/*.exe
