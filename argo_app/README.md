@@ -1,5 +1,5 @@
 # Install and Use odbargo_app
-* Deprecated, it's only used before odbargo_app v0.0.6, but no longer maintained *
+* **Deprecated**, it's only used before odbargo_app v0.0.6, but no longer maintained
 
 ## Introduction  
 `odbargo_app` is a local API server for downloading Biogeochemical (BGC) Argo float data (NetCDF) from the [ERDDAP](https://erddap.ifremer.fr/erddap/index.html) server using [argopy](https://argopy.readthedocs.io/en/latest/) functions. This application is developed by [ODB](https://www.odb.ntu.edu.tw/) and serves as an Argo Mapper plugin to integrate with the ODB Argo WMS layer on the web platform [Ocean APIverse](https://api.odb.ntu.edu.tw/hub/). Visit it for more [details](https://api.odb.ntu.edu.tw/hub/?help=Argo). Follow the steps below to install Python, create a virtual environment, and set up the application.  
