@@ -1,5 +1,7 @@
 # Install and Use odbargo-cli
 
+* **Deprecated**, it works well but we drop the `argopy` dependency in new version of `odbargo-cli`
+
 ## Introduction  
 `odbargo-cli` is a lightweight command-line tool designed to download Biogeochemical (BGC) Argo float data from the [ERDDAP](https://erddap.ifremer.fr/erddap/index.html) server using [argopy](https://argopy.readthedocs.io/en/latest/).
 It is developed by [ODB](https://www.odb.ntu.edu.tw/) as a backend companion for the ODB Argo Mapper plugin in [Ocean APIverse](https://api.odb.ntu.edu.tw/hub/), and also supports standalone interactive use.
