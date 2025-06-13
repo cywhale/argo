@@ -1,5 +1,7 @@
 # 安裝與使用 odbargo_app
 
+* **停止維護**，僅在 odbargo_app v0.0.6 之前使用，請改用新版 odbargo-cli
+
 ## 簡介  
 `odbargo_app` 是生地化 (BGC) Argo 剖面浮標資料下載的一個API本地伺服器，採用了 [argopy](https://argopy.readthedocs.io/en/latest/) 功能從 [ERDDAP](https://erddap.ifremer.fr/erddap/index.html) 伺服器下載 NetCDF。此應用由 [ODB](https://www.odb.ntu.edu.tw/) 開發，並作為在 [Ocean APIverse](https://api.odb.ntu.edu.tw/hub/) 平台上與 ODB Argo WMS 圖層整合之 Argo Mapper 擴充模組。更多細節請參考[這裡](https://api.odb.ntu.edu.tw/hub/?help=Argo)。
 請依照以下步驟安裝 Python、建立虛擬環境，以及設置應用程式。
