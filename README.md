@@ -1,5 +1,7 @@
 # Install and Use odbargo-cli
 
+[![DOI](https://zenodo.org/badge/doi/10.5281/zenodo.15655311.svg)](https://doi.org/10.5281/zenodo.15655311)
+
 ## Introduction  
 `odbargo-cli` is a lightweight command-line tool designed to download Biogeochemical (BGC) Argo float data (NetCDF) from the [ERDDAP](https://erddap.ifremer.fr/erddap/index.html) server.
 It is developed by [ODB](https://www.odb.ntu.edu.tw/) as a Argo plugin in ODB [Ocean APIverse](https://api.odb.ntu.edu.tw/hub/), and also supports standalone interactive use.  Visit it for more [details](https://api.odb.ntu.edu.tw/hub/?help=Argo) about the integration with Ocean APIverse . 
@@ -64,4 +66,5 @@ You will see:
   If the [Ocean APIverse](https://api.odb.ntu.edu.tw/hub/settings) > Options > Plugin > Enable OdbArgo detects this tool running locally, it will communicate via `ws://localhost:8765` to trigger downloads directly.
 
   Use ODB [Argofloats WMS layer](https://api.odb.ntu.edu.tw/hub/earth/settings?ogcurl=https://ecodata.odb.ntu.edu.tw/geoserver/odbargo/wms&service=WMS&layer=argofloats) directly on Ocean APIverse.
+
 
