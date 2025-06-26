@@ -28,8 +28,8 @@ python odbargo-cli.py --port 8765
 若使用編譯好的版本：
 
 ```bash
-./odbargo-cli.exe --port 8765    # Windows
-./odbargo-cli --port 8765        # Linux/macOS
+./odbargo-cli.exe --port 8765    # Windows. 若Window Defender阻止檔案執行，請選【其他資訊】>【仍要執行】
+./odbargo-cli --port 8765        # Linux/macOS. 於Linux須以 `sudo chmod u+x ./odbargo-cli` 使之成為可執行檔
 ```
 
 啟動後畫面會顯示：

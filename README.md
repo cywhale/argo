@@ -31,8 +31,8 @@ python odbargo-cli.py --port 8765
 Or, if using a compiled binary:
 
 ```bash
-./odbargo-cli.exe --port 8765    # Windows
-./odbargo-cli --port 8765        # Linux/macOS
+./odbargo-cli.exe --port 8765    # Windows. If Window Defender block it, click 【More info】>【Run anyway】
+./odbargo-cli --port 8765        # Linux/macOS Need `sudo chmod u+x ./odbargo-cli` to make it executable in Linux.
 ```
 
 You will see:
