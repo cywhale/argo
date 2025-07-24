@@ -7,14 +7,14 @@
    ← {"type":"job_status", "jobId":…, "status":"failed", "message": …}
 """
 
-import asyncio, json, argparse, sys, tempfile, urllib.request, urllib.parse, time
+import asyncio, json, argparse, sys, tempfile, urllib.request, urllib.parse, time, ssl
 from pathlib import Path
 import websockets
 
 frontend_connected = asyncio.Event()
 test_counter = 0
 
-def download_argo_data(wmo_list, output_path):
+def download_argo_data(wmo_list, output_path, insecure=False):
     base_url = "https://erddap.ifremer.fr/erddap/tabledap/ArgoFloats-synthetic-BGC.nc"
     if len(wmo_list) == 1:
         constraint = f'&platform_number=%22{wmo_list[0]}%22'
@@ -22,13 +22,14 @@ def download_argo_data(wmo_list, output_path):
         wmo_pattern = "%7C".join(str(wmo) for wmo in wmo_list)
         constraint = f'&platform_number=~%22{wmo_pattern}%22'
     full_url = f"{base_url}?{constraint}"
-    print(f"Downloading from: {full_url}")
+    print(f"Downloading from: {full_url} {'[INSECURE]' if insecure else ''}")
     try:
         request = urllib.request.Request(full_url)
         request.add_header('User-Agent', 'odbargo-cli/1.0')
         request.add_header('Connection', 'keep-alive')
         request.add_header('Keep-Alive', 'timeout=120, max=1000')
-        with urllib.request.urlopen(request, timeout=300) as response:
+        ssl_ctx = ssl._create_unverified_context() if insecure else ssl.create_default_context()
+        with urllib.request.urlopen(request, timeout=300, context=ssl_ctx) as response:
             if response.getcode() != 200:
                 raise Exception(f"HTTP {response.getcode()}: {response.reason}")
             content_length = response.headers.get('Content-Length')
@@ -47,22 +48,28 @@ def download_argo_data(wmo_list, output_path):
             raise Exception(f"HTTP Error {e.code}: {e.reason}")
     except urllib.error.URLError as e:
         raise Exception(f"Network error: {e.reason}")
+    except ssl.SSLError as e:
+        raise Exception(f"SSL error: {e}")
     except Exception as e:
         raise Exception(f"Download failed: {str(e)}")
 
-def download_with_retry(wmo_list, output_path, retries=3, delay=10):
+def download_with_retry(wmo_list, output_path, retries=3, delay=10, force_insecure=False):
+    insecure_next_try = False
     for attempt in range(retries):
         try:
-            return download_argo_data(wmo_list, output_path)
+            return download_argo_data(wmo_list, output_path, insecure=(force_insecure or insecure_next_try))
         except Exception as e:
             print(f"⚠️ Attempt {attempt + 1} failed: {e}")
+            if "SSL error" in str(e) and attempt == 0:
+                insecure_next_try = True
+
             if attempt < retries - 1:
                 print(f"⏳ Retrying in {delay} seconds...")
                 time.sleep(delay)
             else:
                 raise
 
-async def process_job(ws, job_id, wmo_list, job_number=None):
+async def process_job(ws, job_id, wmo_list, job_number=None, force_insecure=False):
     try:
         print(f"Task {job_number}: {job_id} now downloading {wmo_list}")
         if len(wmo_list) >= 3:
@@ -74,7 +81,7 @@ async def process_job(ws, job_id, wmo_list, job_number=None):
 
         out_dir = tempfile.mkdtemp(prefix="argo_")
         out = Path(out_dir) / f"argo_{'_'.join(map(str,wmo_list))}.nc"
-        success = await asyncio.to_thread(download_with_retry, wmo_list, str(out))
+        success = await asyncio.to_thread(download_with_retry, wmo_list, str(out), force_insecure=force_insecure)
         if success:
             print(f"Download OK: {out}")
             await ws.send(json.dumps({
@@ -102,7 +109,7 @@ async def handler(websocket):
             frontend_connected.set()
         elif data.get("type") == "start_job":
             asyncio.create_task(process_job(
-                websocket, data["jobId"], data["wmoList"], data.get("jobNumber")
+                websocket, data["jobId"], data["wmoList"], data.get("jobNumber"), force_insecure=args.insecure
             ))
 
 async def cli_interactive_mode():
@@ -118,7 +125,7 @@ async def cli_interactive_mode():
         if wmo_list:
             test_counter += 1
             job_id = f"test-{test_counter}"
-            await process_job(FakeSocket(), job_id, wmo_list, job_number=test_counter)
+            await process_job(FakeSocket(), job_id, wmo_list, job_number=test_counter, force_insecure=args.insecure)
         else:
             print("⚠️  No valid WMO IDs found. Try again.")
 
@@ -138,6 +145,7 @@ async def run_server_and_cli(port):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--port", type=int, default=8765, help="Port to serve WebSocket")
+    parser.add_argument("--insecure", action='store_true', help="Force disable SSL cert verification (not recommended)")
     args = parser.parse_args()
     try:
         asyncio.run(run_server_and_cli(args.port))

@@ -36,3 +36,4 @@
         -- try a windows executive
 		-- prepare documentation in markdown/html
 
+#### ver 0.1.1 add --insecure more to disable SSL cert if SSL error and retry downloading
