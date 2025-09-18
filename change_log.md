@@ -37,3 +37,7 @@
 		-- prepare documentation in markdown/html
 
 #### ver 0.1.1 add --insecure more to disable SSL cert if SSL error and retry downloading
+#### ver 0.2.0 add odbargo-view plugin + subset workflows
+        -- spawn spec-driven `odbargo_view` subprocess for dataset preview/plot/export
+        -- extend slash CLI + WS bridge with `/view` help, alias subsets, and binary streaming fixes
+        -- cap preview payloads, surface subset keys, and document usage in README_odbargo-view.md
