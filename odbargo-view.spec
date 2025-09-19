@@ -3,15 +3,24 @@ import sys
 sys.setrecursionlimit(5000)
 
 a = Analysis(
-    ['odbargo-cli.py'],
+    ['odbargo-view_entry.py'],
     pathex=[],
     binaries=[],
     datas=[],
-    hiddenimports=['websockets'],
+    hiddenimports=[
+        'pandas',
+        'numpy',
+        'xarray',
+        'matplotlib',
+        'matplotlib.pyplot',
+        'matplotlib.backends.backend_agg',
+        'h5netcdf',
+        'netCDF4'
+    ],
+    excludes=['argopy'],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=['numpy', 'pandas', 'xarray', 'matplotlib', 'h5netcdf', 'netCDF4', 'argopy'],
     noarchive=False,
     optimize=0,
 )
@@ -23,7 +32,7 @@ exe = EXE(
     a.binaries,
     a.datas,
     [],
-    name='odbargo-cli',
+    name='odbargo-view',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -31,12 +40,10 @@ exe = EXE(
     upx_exclude=[],
     runtime_tmpdir=None,
     console=True,
-    oneFile=True,
+    onefile=True,
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    version='version.txt',
-    icon=['icon.ico'],
 )

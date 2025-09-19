@@ -1,2 +1,0 @@
-[console_scripts]
-odbargo_app = argo_app.app:main

@@ -12,6 +12,8 @@ import argparse
 import asyncio
 import json
 import math
+import os
+import shlex
 import ssl
 import sys
 import tempfile
@@ -108,33 +110,57 @@ class PluginMessageError(Exception):
         self.payload = payload
 
 
+class PluginUnavailableError(RuntimeError):
+    def __init__(self, message: str, hint: Optional[str] = None):
+        super().__init__(message)
+        self.hint = hint
+
+
 class PluginClient:
-    def __init__(self) -> None:
+    def __init__(self, mode: str = "auto", binary_override: Optional[str] = None) -> None:
+        self.mode = mode
+        self._explicit_binary = Path(binary_override).expanduser() if binary_override else None
         self._process: Optional[asyncio.subprocess.Process] = None
         self._lock = asyncio.Lock()
         self._msg_counter = 0
+        self._launch_cmd: Optional[List[str]] = None
+        self._startup_error: Optional[str] = None
 
     async def ensure_started(self) -> None:
+        if self.mode == "none":
+            raise PluginUnavailableError("View plugin disabled (--plugin none)")
+        if self._startup_error:
+            raise PluginUnavailableError(self._startup_error)
         if self._process and self._process.returncode is None:
             return
-        python_executable = sys.executable or "python3"
-        self._process = await asyncio.create_subprocess_exec(
-            python_executable,
-            "-m",
-            "odbargo_view",
-            stdin=asyncio.subprocess.PIPE,
-            stdout=asyncio.subprocess.PIPE,
-        )
+        if self._launch_cmd is None:
+            self._launch_cmd = self._resolve_launch_command()
+        if not self._launch_cmd:
+            self._startup_error = "View plugin not available; run odbargo-view separately or pass --plugin view/--plugin-binary"
+            raise PluginUnavailableError(self._startup_error)
+        try:
+            self._process = await asyncio.create_subprocess_exec(
+                *self._launch_cmd,
+                stdin=asyncio.subprocess.PIPE,
+                stdout=asyncio.subprocess.PIPE,
+                env=self._build_env(),
+            )
+        except FileNotFoundError as exc:
+            self._startup_error = f"Unable to launch view plugin: {exc}"
+            raise PluginUnavailableError(self._startup_error) from exc
         assert self._process.stdout
         hello_line = await self._process.stdout.readline()
         if not hello_line:
-            raise RuntimeError("Plugin exited prematurely with no handshake")
+            self._startup_error = "View plugin exited before handshake"
+            raise PluginUnavailableError(self._startup_error)
         try:
             hello = json.loads(hello_line.decode("utf-8"))
         except json.JSONDecodeError as exc:
-            raise RuntimeError(f"Plugin handshake invalid: {hello_line!r}") from exc
+            self._startup_error = f"Invalid view plugin handshake: {hello_line!r}"
+            raise PluginUnavailableError(self._startup_error) from exc
         if hello.get("type") != "plugin.hello_ok":
-            raise RuntimeError(f"Unexpected plugin handshake: {hello}")
+            self._startup_error = f"Unexpected view plugin handshake: {hello}"
+            raise PluginUnavailableError(self._startup_error)
 
     async def close(self) -> None:
         if self._process and self._process.returncode is None:
@@ -144,6 +170,7 @@ class PluginClient:
                 await asyncio.wait_for(self._process.wait(), timeout=1.0)
             except asyncio.TimeoutError:  # pragma: no cover - defensive
                 self._process.kill()
+        self._process = None
 
     async def open_dataset(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         response = await self._request("open_dataset", payload, mode="simple")
@@ -251,6 +278,54 @@ class PluginClient:
                         return response
         raise RuntimeError("Unhandled plugin mode")
 
+    def _resolve_launch_command(self) -> Optional[List[str]]:
+        candidates: List[List[str]] = []
+
+        def _make_path(path_str: str) -> Optional[List[str]]:
+            path = Path(path_str).expanduser()
+            if path.exists() and path.is_file():
+                return [str(path)]
+            return None
+
+        if self._explicit_binary:
+            if self._explicit_binary.exists():
+                candidates.append([str(self._explicit_binary)])
+            else:
+                self._startup_error = f"Configured view binary not found: {self._explicit_binary}"
+                return None
+        env_binary = os.environ.get("ODBARGO_VIEW_BINARY")
+        if env_binary:
+            from_env = _make_path(env_binary) or shlex.split(env_binary)
+            candidates.append(from_env)
+        if getattr(sys, "frozen", False):  # PyInstaller sibling
+            exe_path = Path(sys.executable)
+            sibling = exe_path.with_name("odbargo-view")
+            sibling_exe = sibling.with_suffix(".exe")
+            for candidate in (sibling, sibling_exe):
+                if candidate.exists():
+                    candidates.append([str(candidate)])
+                    break
+        else:
+            if self.mode == "view":
+                candidates.append([sys.executable or "python3", "-m", "odbargo_view"])
+
+        for cmd in candidates:
+            if not cmd:
+                continue
+            executable = cmd[0]
+            if Path(executable).exists() or os.path.sep not in executable:
+                return cmd
+        return None
+
+    @property
+    def availability_error(self) -> Optional[str]:
+        return self._startup_error
+
+    def _build_env(self) -> Dict[str, str]:
+        env = os.environ.copy()
+        env.setdefault("XARRAY_DISABLE_PLUGIN_AUTOLOADING", "1")
+        return env
+
 
 # ---------------------------------------------------------------------------
 # Slash command helpers (shared with tests)
@@ -280,10 +355,10 @@ def parse_numeric_list(value: str) -> List[int]:
 
 
 class ArgoCLIApp:
-    def __init__(self, port: int, insecure: bool) -> None:
+    def __init__(self, port: int, insecure: bool, plugin_mode: str, plugin_binary: Optional[str]) -> None:
         self.port = port
         self.insecure = insecure
-        self.plugin = PluginClient()
+        self.plugin = PluginClient(mode=plugin_mode, binary_override=plugin_binary)
         self.frontend_connected = asyncio.Event()
         self._last_dataset_key: Optional[str] = None
         self._job_counter = 0
@@ -478,6 +553,13 @@ class ArgoCLIApp:
                 "hint": error_payload.get("hint"),
                 "details": error_payload.get("details"),
             }))
+        except PluginUnavailableError as exc:
+            await websocket.send(json.dumps({
+                "type": "error",
+                "requestId": request_id,
+                "code": "PLUGIN_UNAVAILABLE",
+                "message": str(exc),
+            }))
         except Exception as exc:
             await websocket.send(json.dumps({
                 "type": "error",
@@ -616,6 +698,11 @@ class ArgoCLIApp:
         except PluginMessageError as exc:
             handle_cli_plugin_error(exc.payload)
             return exit_code_for_error(exc.payload.get("code"))
+        except PluginUnavailableError as exc:
+            print(f"ℹ️  {exc}")
+            if exc.hint:
+                print(f"   Hint: {exc.hint}")
+            return EXIT_PLUGIN
         except Exception as exc:
             print(f"❌ {exc}")
             return EXIT_PLUGIN
@@ -851,6 +938,16 @@ def main() -> None:
     parser.add_argument("command", nargs="*", help="Optional slash command(s) to run")
     parser.add_argument("--port", type=int, default=8765, help="Port to serve WebSocket")
     parser.add_argument("--insecure", action="store_true", help="Disable SSL verification for downloads")
+    parser.add_argument(
+        "--plugin",
+        choices=["auto", "view", "none"],
+        default="auto",
+        help="View plugin mode: auto (attempt if available), view (force), none (disable)",
+    )
+    parser.add_argument(
+        "--plugin-binary",
+        help="Path to an odbargo-view executable (overrides auto detection)",
+    )
     args = parser.parse_args()
 
     commands: List[str] = []
@@ -858,7 +955,7 @@ def main() -> None:
         raw = " ".join(args.command)
         commands = split_commands(raw)
 
-    app = ArgoCLIApp(args.port, args.insecure)
+    app = ArgoCLIApp(args.port, args.insecure, args.plugin, args.plugin_binary)
 
     async def runner() -> int:
         if commands:

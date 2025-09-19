@@ -18,8 +18,8 @@ EXIT_PLUGIN = 10
 HELP_ENTRIES = {
     "open": "/view open <path> [as <key>] - load a NetCDF file and register a dataset key",
     "list_vars": "/view list_vars [<key>] - list coordinates and variables for the dataset",
-    "preview": "/view preview <key> [as <subset>] [--cols --filter --bbox --start --end] - tabular preview with optional subset registration",
-    "plot": "/view plot <key> <timeseries|profile|map> [--x --y --bbox --start --end --cmap --out] - render matplotlib charts (maps default to LONGITUDE/LATITUDE axes)",
+    "preview": "/view preview <key> [as <subset>] [--cols --filter --bbox --start --end --order] - tabular preview with optional subset registration",
+    "plot": "/view plot <key> <timeseries|profile|map> [--x --y --bbox --start --end --order --cmap --out] - render matplotlib charts (maps default to LONGITUDE/LATITUDE axes)",
     "export": "/view export <key> csv [--cols ... --filter ... --out ...] - stream a filtered CSV export",
     "close": "/view close [<key>] - close and release a dataset from memory",
     "help": "/view help [command] - show available /view commands and usage",

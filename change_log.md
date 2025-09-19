@@ -47,3 +47,6 @@
         -- open non-blocking matplotlib preview window when slash plots omit `--out`
         -- default map plots to LONGITUDE/LATITUDE axes, reshape values onto a lon/lat mesh, and support `--y` (field colour) plus `--cmap`
         -- allow `--order` sorting across preview/plot/export, run CLI exports in the background, enable readline history/navigation, and refresh README_odbargo-view.md with new usage examples
+#### ver 0.2.2 optional viewer + packaging updates
+        -- add PyInstaller one-file build commands for CLI and view plugin, keeping heavy deps in the companion binary
+        -- make view plugin optional (`--plugin auto|view|none`), support explicit binaries, and emit clear messaging when disabled or missing

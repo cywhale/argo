@@ -11,6 +11,14 @@ pip install -e .[view]  # ensures pandas/matplotlib extras are present
 ```
 Run the subprocess manually for smoke testing with `python -m odbargo_view`; it waits for NDJSON commands on stdin and emits a handshake message when ready.
 
+### Building one-file binaries
+Use PyInstaller to produce standalone executables:
+```bash
+pyinstaller odbargo-cli.spec --onefile
+pyinstaller odbargo-view.spec --onefile
+```
+Ship both binaries together so `odbargo-cli` can spawn `odbargo-view` on demand.
+
 ## Supported Operations
 The plugin implements the contract defined in `specs/odbargo_view_spec_v_0.md`:
 - `open_dataset` loads a NetCDF file using `h5netcdf` (fallback to default engine) and returns dataset metadata.
@@ -31,6 +39,11 @@ Within the `/view` slash interface, the commands proxy directly to the plugin:
 - `/view plot ds1 timeseries --x TIME --y DOXY --out doxy.png`
 - `/view export ds1 csv --filter "PRES BETWEEN 25 AND 100" --out subset.csv`
 Use `/view help` for a quick reminder of the available verbs.
+
+### Activating the plugin
+- Run `odbargo-cli --plugin view` to force the viewer to start, or leave the default `--plugin auto` to launch it on-demand the first time you issue a `/view` command.
+- Supply a standalone binary via `--plugin-binary /path/to/odbargo-view` (or set `ODBARGO_VIEW_BINARY`) when bundling with PyInstaller.
+- If the viewer is unavailable (`--plugin none` or binary missing), `/view` commands return a friendly message and the CLI continues to operate as a downloader only. Activate the viewer later by starting `odbargo-cli --plugin view` or providing the binary and rerunning the command.
 
 ### Spatial & Temporal Filters
 - `--bbox x0,y0,x1,y1` (or the alias `--box`) constrains rows to latitude/longitude ranges, automatically matching the dataset’s coordinate column names.

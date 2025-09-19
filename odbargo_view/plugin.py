@@ -4,9 +4,18 @@ import traceback
 import io
 import math
 import hashlib
+import os
+import warnings
 from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple, Iterable, Union
+
+os.environ.setdefault("XARRAY_DISABLE_PLUGIN_AUTOLOADING", "1")
+warnings.filterwarnings(
+    "ignore",
+    message="Engine 'argo' loading failed",
+    category=RuntimeWarning,
+)
 
 import xarray as xr
 import numpy as np

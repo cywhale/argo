@@ -39,6 +39,15 @@ def test_parse_preview_with_spatiotemporal_filters():
     assert payload["end"] == "2012-01-01"
 
 
+def test_parse_preview_with_order_option():
+    raw = "/view preview ds1 --order TIME:desc,LONGITUDE"
+    parsed = parse_slash_command(raw, None)
+    assert parsed.request_payload["orderBy"] == [
+        {"col": "TIME", "dir": "desc"},
+        {"col": "LONGITUDE", "dir": "asc"},
+    ]
+
+
 def test_parse_preview_with_box_alias():
     raw = "/view preview ds1 --box 100,-20,179.99,25"
     parsed = parse_slash_command(raw, None)
