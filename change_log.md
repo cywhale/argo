@@ -50,3 +50,4 @@
 #### ver 0.2.2 optional viewer + packaging updates
         -- add PyInstaller one-file build commands for CLI and view plugin, keeping heavy deps in the companion binary
         -- make view plugin optional (`--plugin auto|view|none`), support explicit binaries, and emit clear messaging when disabled or missing
+#### ver 0.2.3 fix matplotlib plot window cannot open (main CLI-VIEW devision and connection/n1)

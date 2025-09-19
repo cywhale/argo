@@ -835,64 +835,65 @@ def render_view_help(topic: Optional[str]) -> None:
         print(f"  - {HELP_ENTRIES[key]}")
 
 
-def display_plot_window(png_bytes: bytes, loop: Optional[asyncio.AbstractEventLoop] = None) -> None:
-    try:
-        import matplotlib.pyplot as plt
-        import matplotlib.image as mpimg
-    except Exception as exc:  # pragma: no cover - optional GUI dependency
-        print(f"⚠️  Unable to display plot window (matplotlib GUI unavailable): {exc}")
-        return
+def display_plot_window(png_bytes: bytes, loop: Optional[asyncio.AbstractEventLoop] = None, *, filename_hint: str = "plot.png") -> None:
+    """
+    Display a PNG without importing matplotlib:
+      1) write to a unique temp file
+      2) best-effort open with the OS default image viewer
+      3) fall back to the default web browser, else just print the path
 
-    from io import BytesIO
+    The 'loop' arg is kept for API compatibility but not used here.
+    """
+    import platform
+    import subprocess
+    import tempfile
+    import webbrowser
+    from pathlib import Path
 
+    # 1) Save to a temp file (prefix/suffix help users recognize the file)
+    suffix = filename_hint if filename_hint.endswith(".png") else (filename_hint + ".png")
+    fd, temp_path_str = tempfile.mkstemp(prefix="odbargo_", suffix="_" + suffix)
+    temp_path = Path(temp_path_str)
     try:
-        image = mpimg.imread(BytesIO(png_bytes), format="png")
+        with os.fdopen(fd, "wb") as f:
+            f.write(png_bytes)
     except Exception as exc:
-        print(f"⚠️  Failed to decode plot image: {exc}")
+        print(f"⚠️  Failed to write plot to temp file: {exc}")
         return
 
+    # 2) Try to open with the OS default image viewer
+    opened = False
     try:
-        plt.rcParams["figure.raise_window"] = False
+        sysname = platform.system()
+        if sysname == "Windows":
+            # 'start' is a shell built-in; use cmd /c
+            subprocess.run(["cmd", "/c", "start", "", str(temp_path)], check=False)
+            opened = True
+        elif sysname == "Darwin":
+            subprocess.run(["open", str(temp_path)], check=False)
+            opened = True
+        else:
+            # Linux/BSD: xdg-open is the common launcher; harmless if it no-ops on headless
+            subprocess.run(["xdg-open", str(temp_path)], check=False)
+            opened = True
+    except Exception:
+        opened = False
+
+    if opened:
+        print(f"🖼️  Opened with system viewer → {temp_path}")
+        return
+
+    # 3) Fallback: try default browser
+    try:
+        webbrowser.open("file://" + str(temp_path))
+        print(f"🖼️  Opened in default browser → {temp_path}")
+        return
     except Exception:
         pass
 
-    try:
-        plt.ion()
-    except Exception:
-        pass
-
-    fig, ax = plt.subplots()
-    ax.imshow(image)
-    ax.axis("off")
-
-    manager = getattr(fig.canvas, "manager", None)
-    if manager and hasattr(manager, "set_window_title"):
-        try:
-            manager.set_window_title("odbargo-view plot")
-        except Exception:
-            pass
-
-    try:
-        plt.show(block=False)
-        try:
-            fig.canvas.flush_events()
-        except Exception:
-            pass
-        plt.pause(0.001)
-    except Exception as exc:
-        print(f"⚠️  Unable to show plot window: {exc}")
-        return
-
-    if loop is not None:
-        def _pump() -> None:
-            try:
-                if plt.get_fignums():
-                    plt.pause(0.05)
-                    loop.call_later(0.1, _pump)
-            except Exception:
-                pass
-
-        loop.call_later(0.1, _pump)
+    # 4) Last resort: tell the user where the file is
+    print(f"🖼️  Plot saved to: {temp_path}")
+    print("    (Could not auto-open; open the file manually or use --out <file.png>)")
 
 
 def render_preview(response: Dict[str, Any], limit_cli: int = 20) -> None:
