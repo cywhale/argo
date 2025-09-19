@@ -41,3 +41,9 @@
         -- spawn spec-driven `odbargo_view` subprocess for dataset preview/plot/export
         -- extend slash CLI + WS bridge with `/view` help, alias subsets, and binary streaming fixes
         -- cap preview payloads, surface subset keys, and document usage in README_odbargo-view.md
+#### ver 0.2.1 spatial-temporal filters + plot window fallback
+        -- add `--bbox/--box` and `--start/--end` slash options layered with existing filters across preview/plot/export
+        -- compose bbox/time predicates inside plugin filter pipeline and persist them for subset reuse
+        -- open non-blocking matplotlib preview window when slash plots omit `--out`
+        -- default map plots to LONGITUDE/LATITUDE axes, reshape values onto a lon/lat mesh, and support `--y` (field colour) plus `--cmap`
+        -- allow `--order` sorting across preview/plot/export, run CLI exports in the background, enable readline history/navigation, and refresh README_odbargo-view.md with new usage examples

@@ -1,0 +1,91 @@
+import numpy as np
+import pytest
+import xarray as xr
+
+pytest.importorskip("pandas", reason="pandas is required for plugin filtering tests")
+
+from odbargo_view.plugin import OdbArgoViewPlugin, PluginError, _build_dataframe
+
+
+def make_dataset() -> xr.Dataset:
+    obs = np.arange(3)
+    times = np.array(["2006-01-01", "2009-06-15", "2011-08-01"], dtype="datetime64[ns]")
+    longitudes = np.array([118.0, 120.5, 123.0])
+    latitudes = np.array([19.5, 21.0, 24.0])
+    pres = np.array([5.0, 50.0, 75.0])
+    return xr.Dataset(
+        data_vars={"PRES": ("obs", pres)},
+        coords={
+            "obs": obs,
+            "TIME": ("obs", times),
+            "LONGITUDE": ("obs", longitudes),
+            "LATITUDE": ("obs", latitudes),
+        },
+    )
+
+
+def test_parse_filter_combines_bbox_and_time():
+    plugin = OdbArgoViewPlugin()
+    df = _build_dataframe(make_dataset())
+
+    mask, stored_spec = plugin._parse_filter(
+        {
+            "bbox": [119.0, 20.0, 122.0, 23.0],
+            "start": "2007-12-01",
+            "end": "2012-01-01",
+        },
+        df,
+    )
+
+    assert mask.sum() == 1
+    assert stored_spec is not None
+    assert stored_spec.json_spec is not None
+
+
+def test_parse_filter_invalid_bbox_length():
+    plugin = OdbArgoViewPlugin()
+    df = _build_dataframe(make_dataset())
+
+    with pytest.raises(PluginError):
+        plugin._parse_filter({"bbox": [119.0, 20.0, 122.0]}, df)
+
+
+def test_resolve_map_columns_defaults():
+    plugin = OdbArgoViewPlugin()
+    df = _build_dataframe(make_dataset())
+    lon_col, lat_col, value_col = plugin._resolve_map_columns(df, {"kind": "map", "y": "PRES"}, None)
+    assert lon_col == "LONGITUDE"
+    assert lat_col == "LATITUDE"
+    assert value_col == "PRES"
+
+
+def test_build_map_grid_with_regular_coords():
+    plugin = OdbArgoViewPlugin()
+    ds = xr.Dataset(
+        data_vars={
+            "DOXY": (("LATITUDE", "LONGITUDE"), np.array([[1.0, 2.0], [3.0, 4.0]])),
+        },
+        coords={
+            "LATITUDE": np.array([-10.0, 0.0]),
+            "LONGITUDE": np.array([100.0, 120.0]),
+        },
+    )
+    df = _build_dataframe(ds)
+    grid = plugin._build_map_grid(df, "LONGITUDE", "LATITUDE", "DOXY")
+    assert grid is not None
+    lon_grid, lat_grid, values = grid
+    assert lon_grid.shape == (2, 2)
+    assert lat_grid.shape == (2, 2)
+    assert values.shape == (2, 2)
+    assert pytest.approx(values[0, 0]) == 1.0
+
+
+def test_apply_order_sorts_dataframe():
+    import pandas as pd
+
+    plugin = OdbArgoViewPlugin()
+    df = pd.DataFrame({"A": [3, 1, 2], "B": [30, 10, 20]})
+    ordered = plugin._apply_order(df, [{"col": "A", "dir": "asc"}])
+    assert ordered["A"].tolist() == [1, 2, 3]
+    ordered_desc = plugin._apply_order(df, [{"col": "B", "dir": "desc"}])
+    assert ordered_desc["B"].tolist() == [30, 20, 10]

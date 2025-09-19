@@ -30,8 +30,23 @@ def test_parse_preview_with_options():
     assert payload["filter"]["dsl"] == "PRES >= 10"
 
 
+def test_parse_preview_with_spatiotemporal_filters():
+    raw = "/view preview ds1 --bbox 119,20,122,23 --start 2007-12-01 --end 2012-01-01"
+    parsed = parse_slash_command(raw, None)
+    payload = parsed.request_payload
+    assert payload["bbox"] == [119.0, 20.0, 122.0, 23.0]
+    assert payload["start"] == "2007-12-01"
+    assert payload["end"] == "2012-01-01"
+
+
+def test_parse_preview_with_box_alias():
+    raw = "/view preview ds1 --box 100,-20,179.99,25"
+    parsed = parse_slash_command(raw, None)
+    assert parsed.request_payload["bbox"] == [100.0, -20.0, 179.99, 25.0]
+
+
 def test_parse_plot_with_output_and_flags(tmp_path):
-    raw = "/view plot ds1 timeseries --x TIME --y DOXY --size 800x600 --dpi 120 --grid --out plot.png"
+    raw = "/view plot ds1 timeseries --x TIME --y DOXY --size 800x600 --dpi 120 --grid --cmap plasma --order TIME:desc --out plot.png"
     parsed = parse_slash_command(raw, None)
     assert parsed.request_type == "view.plot"
     style = parsed.request_payload.get("style")
@@ -39,7 +54,9 @@ def test_parse_plot_with_output_and_flags(tmp_path):
     assert style["height"] == 600
     assert style["dpi"] == 120
     assert style["grid"] is True
+    assert style["cmap"] == "plasma"
     assert parsed.out_path == Path("plot.png")
+    assert parsed.request_payload["orderBy"] == [{"col": "TIME", "dir": "desc"}]
 
 
 def test_exit_code_for_known_errors():

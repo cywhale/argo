@@ -4,6 +4,7 @@ import traceback
 import io
 import math
 import hashlib
+from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple, Iterable, Union
 
@@ -566,16 +567,86 @@ class OdbArgoViewPlugin:
         mask = pd.Series([True] * len(df), index=df.index)
         if base_filters:
             mask = mask & self._mask_from_filter_specs(base_filters, df)
+        json_nodes: List[Dict[str, Any]] = []
         stored_spec: Optional[FilterSpec] = None
-        if not filter_obj:
-            return mask.fillna(False), stored_spec
-        if "dsl" in filter_obj and filter_obj["dsl"]:
-            dsl_mask, _ = _evaluate_dsl_filter(filter_obj["dsl"], df)
+
+        dsl_text = filter_obj.get("dsl") if filter_obj else None
+        if dsl_text:
+            dsl_mask, _ = _evaluate_dsl_filter(dsl_text, df)
             mask = mask & dsl_mask
-        if "json" in filter_obj and filter_obj["json"]:
-            json_mask = _evaluate_json_filter(filter_obj["json"], df)
+
+        if filter_obj.get("json"):
+            json_spec = deepcopy(filter_obj["json"])
+            json_mask = _evaluate_json_filter(json_spec, df)
             mask = mask & json_mask
-        stored_spec = FilterSpec(dsl=filter_obj.get("dsl"), json_spec=filter_obj.get("json"))
+            json_nodes.append(json_spec)
+
+        bbox = message.get("bbox")
+        if bbox is None:
+            bbox = message.get("box")
+        if bbox is not None:
+            if isinstance(bbox, str):
+                bbox_values = [part.strip() for part in bbox.split(",") if part.strip()]
+            else:
+                bbox_values = list(bbox)
+            if len(bbox_values) != 4:
+                raise PluginError("FILTER_INVALID", "bbox requires four numeric values: x0,y0,x1,y1")
+            try:
+                x0, y0, x1, y1 = [float(value) for value in bbox_values]
+            except (TypeError, ValueError) as exc:
+                raise PluginError("FILTER_INVALID", "bbox values must be numeric") from exc
+            lon_col = self._resolve_column(df, ["LONGITUDE", "longitude", "lon"], "LONGITUDE")
+            lat_col = self._resolve_column(df, ["LATITUDE", "latitude", "lat"], "LATITUDE")
+            lon_min, lon_max = sorted((x0, x1))
+            lat_min, lat_max = sorted((y0, y1))
+            bbox_json = {
+                "and": [
+                    {"between": [lon_col, lon_min, lon_max]},
+                    {"between": [lat_col, lat_min, lat_max]},
+                ]
+            }
+            json_nodes.append(bbox_json)
+            mask = mask & _evaluate_json_filter(bbox_json, df)
+
+        start = message.get("start")
+        end = message.get("end")
+        if start or end:
+            time_col = self._resolve_column(df, ["TIME", "time"], "TIME")
+            time_nodes: List[Dict[str, Any]] = []
+            if start:
+                try:
+                    start_ts = pd.to_datetime(start)
+                except Exception as exc:  # pragma: no cover - defensive
+                    raise PluginError("FILTER_INVALID", f"Invalid start datetime '{start}'") from exc
+                if pd.isna(start_ts):
+                    raise PluginError("FILTER_INVALID", f"Invalid start datetime '{start}'")
+                time_nodes.append({">=": [time_col, start_ts.isoformat()]})
+            if end:
+                try:
+                    end_ts = pd.to_datetime(end)
+                except Exception as exc:  # pragma: no cover - defensive
+                    raise PluginError("FILTER_INVALID", f"Invalid end datetime '{end}'") from exc
+                if pd.isna(end_ts):
+                    raise PluginError("FILTER_INVALID", f"Invalid end datetime '{end}'")
+                time_nodes.append({"<=": [time_col, end_ts.isoformat()]})
+            if time_nodes:
+                if len(time_nodes) == 1:
+                    time_json: Dict[str, Any] = time_nodes[0]
+                else:
+                    time_json = {"and": time_nodes}
+                json_nodes.append(time_json)
+                mask = mask & _evaluate_json_filter(time_json, df)
+
+        combined_json: Optional[Dict[str, Any]] = None
+        if json_nodes:
+            if len(json_nodes) == 1:
+                combined_json = json_nodes[0]
+            else:
+                combined_json = {"and": json_nodes}
+
+        if dsl_text or combined_json:
+            stored_spec = FilterSpec(dsl=dsl_text, json_spec=combined_json)
+
         return mask.fillna(False), stored_spec
 
     def _collect_columns(self, message: Dict[str, Any], subset_filters: Optional[List[FilterSpec]] = None, allowed_columns: Optional[List[str]] = None) -> List[str]:
@@ -588,6 +659,11 @@ class OdbArgoViewPlugin:
             parser = DSLParser(filter_obj["dsl"])
             _, identifiers = parser.parse()
             extra_cols.extend(identifiers)
+        bbox_present = message.get("bbox") if message.get("bbox") is not None else message.get("box")
+        if bbox_present:
+            extra_cols.extend(["LONGITUDE", "LATITUDE"])
+        if message.get("start") or message.get("end"):
+            extra_cols.append("TIME")
         if subset_filters:
             for filt in subset_filters:
                 if filt.json_spec:
@@ -606,6 +682,105 @@ class OdbArgoViewPlugin:
         if allowed_columns is not None:
             result = [col for col in result if col in allowed_columns]
         return result
+
+    def _apply_order(self, df: pd.DataFrame, order_by: List[Dict[str, Any]], allowed_columns: Optional[List[str]] = None) -> pd.DataFrame:
+        if not order_by:
+            return df
+        sort_cols: List[str] = []
+        ascending: List[bool] = []
+        for entry in order_by:
+            col = entry.get("col")
+            if not col:
+                continue
+            if allowed_columns is not None and col not in allowed_columns:
+                raise PluginError("COLUMN_UNKNOWN", f"Column '{col}' not in subset")
+            if col not in df.columns:
+                raise PluginError("COLUMN_UNKNOWN", f"Unknown column '{col}'")
+            direction = (entry.get("dir") or "asc").lower()
+            sort_cols.append(col)
+            ascending.append(direction != "desc")
+        if not sort_cols:
+            return df
+        return df.sort_values(by=sort_cols, ascending=ascending, kind="mergesort")
+
+    def _resolve_column(self, df: pd.DataFrame, candidates: Iterable[str], label: str) -> str:
+        columns = list(df.columns)
+        for name in candidates:
+            if name in columns:
+                return name
+        lower_map = {col.lower(): col for col in columns}
+        for name in candidates:
+            match = lower_map.get(name.lower())
+            if match:
+                return match
+        raise PluginError("FILTER_INVALID", f"Dataset missing required {label} column for filter")
+
+    def _required_filter_columns(
+        self,
+        message: Dict[str, Any],
+        df: pd.DataFrame,
+        allowed_columns: Optional[List[str]],
+    ) -> List[str]:
+        required: List[str] = []
+        bbox_present = message.get("bbox") if message.get("bbox") is not None else message.get("box")
+        if bbox_present:
+            lon_col = self._resolve_column(df, ["LONGITUDE", "longitude", "lon"], "LONGITUDE")
+            lat_col = self._resolve_column(df, ["LATITUDE", "latitude", "lat"], "LATITUDE")
+            required.extend([lon_col, lat_col])
+        if message.get("start") or message.get("end"):
+            time_col = self._resolve_column(df, ["TIME", "time"], "TIME")
+            required.append(time_col)
+        if allowed_columns is not None:
+            disallowed = [col for col in required if col not in allowed_columns]
+            if disallowed:
+                raise PluginError("COLUMN_UNKNOWN", f"Column '{disallowed[0]}' not in subset")
+        return required
+
+    def _resolve_map_columns(
+        self,
+        df: pd.DataFrame,
+        message: Dict[str, Any],
+        allowed_columns: Optional[List[str]],
+    ) -> Tuple[str, str, Optional[str]]:
+        style = message.get("style") or {}
+        lon_col = message.get("x") or style.get("lon") or "LONGITUDE"
+        lat_col = style.get("lat") or "LATITUDE"
+        value_col = message.get("z") or style.get("field") or style.get("fields")
+        y_token = message.get("y")
+        if not value_col and y_token and y_token not in {lon_col, lat_col}:
+            value_col = y_token
+        required = [lon_col, lat_col]
+        if value_col:
+            required.append(value_col)
+        if allowed_columns is not None:
+            missing = [col for col in required if col and col not in allowed_columns]
+            if missing:
+                raise PluginError("COLUMN_UNKNOWN", f"Column '{missing[0]}' not in subset")
+        return lon_col, lat_col, value_col
+
+    def _build_map_grid(
+        self,
+        df: pd.DataFrame,
+        lon_col: str,
+        lat_col: str,
+        value_col: Optional[str],
+    ) -> Optional[Tuple[np.ndarray, np.ndarray, np.ndarray]]:
+        if not value_col or value_col not in df.columns:
+            return None
+        pivot = df.pivot_table(index=lat_col, columns=lon_col, values=value_col, aggfunc="mean")
+        if pivot.empty or pivot.shape[0] < 2 or pivot.shape[1] < 2:
+            return None
+        pivot = pivot.sort_index().sort_index(axis=1)
+        try:
+            lon_vals = pd.to_numeric(pivot.columns)
+        except Exception:
+            lon_vals = pivot.columns.to_numpy()
+        try:
+            lat_vals = pd.to_numeric(pivot.index)
+        except Exception:
+            lat_vals = pivot.index.to_numpy()
+        lon_grid, lat_grid = np.meshgrid(lon_vals, lat_vals)
+        return lon_grid, lat_grid, pivot.to_numpy()
 
     def _extract_fields_from_json(self, node: Dict[str, Any]) -> List[str]:
         fields: List[str] = []
@@ -640,6 +815,9 @@ class OdbArgoViewPlugin:
             subset_filters=subset_spec.filters if subset_spec else None,
             allowed_columns=allowed_columns,
         )
+        for extra_col in self._required_filter_columns(message, df, allowed_columns):
+            if extra_col not in columns:
+                columns.append(extra_col)
         if not columns:
             if allowed_columns is not None:
                 columns = list(allowed_columns)
@@ -664,17 +842,7 @@ class OdbArgoViewPlugin:
                 raise PluginError("COLUMN_UNKNOWN", f"Unknown column '{col}'")
         filter_mask, requested_spec = self._parse_filter(message, df, base_filters=subset_spec.filters if subset_spec else None)
         df = df[filter_mask]
-        if order_by:
-            sort_cols = []
-            ascending = []
-            for entry in order_by:
-                col = entry.get("col")
-                direction = entry.get("dir", "asc").lower()
-                if col not in df.columns:
-                    raise PluginError("COLUMN_UNKNOWN", f"Unknown column '{col}'")
-                sort_cols.append(col)
-                ascending.append(direction != "desc")
-            df = df.sort_values(by=sort_cols, ascending=ascending, kind="mergesort")
+        df = self._apply_order(df, order_by, allowed_columns)
         total_rows = len(df)
         start = int(cursor) if cursor else 0
         if start < 0:
@@ -723,14 +891,19 @@ class OdbArgoViewPlugin:
         base_ds, subset_spec = self.store.resolve(dataset_key)
         df = _build_dataframe(base_ds)
         allowed_columns = subset_spec.columns if subset_spec and subset_spec.columns is not None else None
-        if allowed_columns is not None:
-            missing = [col for col in [x_col, y_col, message.get("z")] if col and col not in allowed_columns]
-            if missing:
-                raise PluginError("COLUMN_UNKNOWN", f"Column '{missing[0]}' not in subset")
         filter_mask, _ = self._parse_filter(message, df, base_filters=subset_spec.filters if subset_spec else None)
         df = df[filter_mask]
+        df = self._apply_order(df, message.get("orderBy") or [], allowed_columns)
         if df.empty:
             raise PluginError("PLOT_FAIL", "Filter returned no rows")
+        if kind == "timeseries" and x_col:
+            if x_col not in df.columns:
+                raise PluginError("COLUMN_UNKNOWN", f"Unknown column '{x_col}'")
+            try:
+                sorted_values = pd.to_datetime(df[x_col])
+            except Exception:
+                sorted_values = df[x_col]
+            df = df.assign(**{x_col: sorted_values}).sort_values(by=x_col)
         width = style.get("width", 800)
         height = style.get("height", 600)
         dpi = style.get("dpi", 120)
@@ -738,12 +911,21 @@ class OdbArgoViewPlugin:
         fig, ax = plt.subplots(figsize=figsize, dpi=dpi)
         try:
             if kind == "timeseries":
+                if allowed_columns is not None:
+                    missing = [col for col in [x_col, y_col] if col and col not in allowed_columns]
+                    if missing:
+                        raise PluginError("COLUMN_UNKNOWN", f"Column '{missing[0]}' not in subset")
                 if not x_col or not y_col:
                     raise PluginError("PLOT_FAIL", "timeseries plot requires x and y columns")
                 ax.plot(df[x_col], df[y_col], marker=style.get("marker", ""), linestyle=style.get("line", "-"), alpha=style.get("alpha", 1.0))
                 ax.set_xlabel(x_col)
                 ax.set_ylabel(y_col)
             elif kind == "profile":
+                if allowed_columns is not None:
+                    required_cols = [col for col in [x_col, y_col] if col]
+                    missing = [col for col in required_cols if col not in allowed_columns]
+                    if missing:
+                        raise PluginError("COLUMN_UNKNOWN", f"Column '{missing[0]}' not in subset")
                 if not x_col:
                     raise PluginError("PLOT_FAIL", "profile plot requires x column")
                 y_column = y_col or "PRES"
@@ -753,19 +935,42 @@ class OdbArgoViewPlugin:
                 if style.get("invert_y", True):
                     ax.invert_yaxis()
             elif kind == "map":
-                lon_col = style.get("lon", x_col or "LONGITUDE")
-                lat_col = style.get("lat", y_col or "LATITUDE")
+                lon_col, lat_col, value_col = self._resolve_map_columns(df, message, allowed_columns)
                 if lon_col not in df.columns or lat_col not in df.columns:
                     raise PluginError("PLOT_FAIL", "map plot requires longitude and latitude columns")
-                ax.scatter(df[lon_col], df[lat_col], c=df.get(message.get("z")) if message.get("z") in df.columns else None, s=style.get("size", 20), alpha=style.get("alpha", 0.8))
+                cmap = style.get("cmap", "viridis")
+                grid = self._build_map_grid(df, lon_col, lat_col, value_col)
+                if grid is not None:
+                    lon_grid, lat_grid, value_grid = grid
+                    pcm = ax.pcolormesh(lon_grid, lat_grid, value_grid, shading="auto", cmap=cmap)
+                    cbar = fig.colorbar(pcm, ax=ax)
+                    if value_col:
+                        cbar.set_label(value_col)
+                else:
+                    color_values = df[value_col] if value_col and value_col in df.columns else None
+                    scatter = ax.scatter(
+                        df[lon_col],
+                        df[lat_col],
+                        c=color_values,
+                        cmap=cmap if color_values is not None else None,
+                        s=style.get("size", 20),
+                        alpha=style.get("alpha", 0.8),
+                    )
+                    if color_values is not None:
+                        cbar = fig.colorbar(scatter, ax=ax)
+                        cbar.set_label(value_col)
                 ax.set_xlabel(lon_col)
                 ax.set_ylabel(lat_col)
+                if style.get("grid"):
+                    ax.set_aspect("equal", adjustable="datalim")
             else:
                 raise PluginError("PLOT_FAIL", f"Unsupported plot kind '{kind}'")
             if style.get("title"):
                 ax.set_title(style["title"])
-            if style.get("grid"):
+            if kind != "map" and style.get("grid"):
                 ax.grid(True)
+            if kind == "map" and style.get("grid"):
+                ax.grid(True, linestyle=style.get("grid_linestyle", "--"), alpha=style.get("grid_alpha", 0.3))
             buf = io.BytesIO()
             fig.savefig(buf, format="png", dpi=dpi, bbox_inches="tight")
             png_bytes = buf.getvalue()
@@ -800,6 +1005,7 @@ class OdbArgoViewPlugin:
                     raise PluginError("COLUMN_UNKNOWN", f"Unknown column '{col}'")
         filter_mask, _ = self._parse_filter(message, df, base_filters=subset_spec.filters if subset_spec else None)
         df = df[filter_mask]
+        df = self._apply_order(df, message.get("orderBy") or [], allowed_columns)
         if columns:
             df = df[columns]
         buffer = io.StringIO()

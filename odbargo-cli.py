@@ -17,7 +17,15 @@ import sys
 import tempfile
 import time
 from pathlib import Path
-from typing import Any, Awaitable, Callable, Dict, Iterable, List, Optional
+from typing import Any, Awaitable, Callable, Dict, Iterable, List, Optional, Set
+
+try:  # Optional readline support for interactive editing
+    import readline  # type: ignore
+except ImportError:  # pragma: no cover - Windows fallback
+    try:
+        import pyreadline3 as readline  # type: ignore
+    except ImportError:  # pragma: no cover - readline unavailable
+        readline = None  # type: ignore
 
 import websockets
 
@@ -28,6 +36,13 @@ from argo_cli import (
     parse_slash_command,
     split_commands,
 )
+
+
+def _append_chunk(path: Path, data: bytes) -> None:
+    with path.open("ab") as fh:
+        fh.write(data)
+
+
 # ---------------------------------------------------------------------------
 # Download helpers (legacy functionality)
 # ---------------------------------------------------------------------------
@@ -273,6 +288,11 @@ class ArgoCLIApp:
         self._last_dataset_key: Optional[str] = None
         self._job_counter = 0
         self._ws_server: Optional[asyncio.AbstractServer] = None
+        self._readline = readline if 'readline' in globals() else None
+        self._interactive = False
+        self._background_tasks: Set[asyncio.Task[Any]] = set()
+        if self._readline:
+            self._configure_readline()
 
     # ----------------------------- WS layer -----------------------------
     async def run_server(self) -> None:
@@ -468,6 +488,7 @@ class ArgoCLIApp:
 
     # ----------------------------- CLI layer -----------------------------
     async def run_repl(self) -> None:
+        self._interactive = True
         print("🟡 CLI interactive mode. Type '/view ...' commands or comma-separated WMO list. Type 'exit' to quit.")
         while True:
             try:
@@ -479,6 +500,11 @@ class ArgoCLIApp:
                 break
             if not line.strip():
                 continue
+            if self._readline:
+                try:
+                    self._readline.add_history(line)
+                except Exception:  # pragma: no cover - readline quirk
+                    pass
             if line.strip().lower() in {"exit", "quit", ":q"}:
                 break
             commands = split_commands(line)
@@ -490,8 +516,14 @@ class ArgoCLIApp:
                     exit_code = await self.execute_slash_command(command)
                     if exit_code != EXIT_SUCCESS:
                         print(f"(exit code {exit_code})")
-                else:
-                    await self._run_download_from_cli(command)
+                    continue
+                await self._run_download_from_cli(command)
+        try:
+            import matplotlib.pyplot as plt
+            plt.close('all')
+        except Exception:
+            pass
+        self._interactive = False
 
     async def _run_download_from_cli(self, line: str) -> None:
         digits = [c for c in line if c.isdigit() or c == ","]
@@ -553,10 +585,12 @@ class ArgoCLIApp:
                 print(f"🧹 Closed dataset {parsed.request_payload['datasetKey']}")
                 return EXIT_SUCCESS
             if parsed.request_type == "view.plot":
-                if parsed.out_path is None:
-                    print("ℹ️  No --out specified; binary plot will be emitted via WebSocket if connected.")
-                else:
+                show_window = parsed.out_path is None
+                if not show_window:
                     parsed.out_path.parent.mkdir(parents=True, exist_ok=True)
+                else:
+                    print("🖼️  Plot will open in a window (use --out to save instead).")
+                loop = asyncio.get_running_loop()
                 async def on_header(message: Dict[str, Any]) -> None:
                     size = message.get("size")
                     ctype = message.get("contentType")
@@ -565,33 +599,19 @@ class ArgoCLIApp:
                     if parsed.out_path:
                         parsed.out_path.write_bytes(data)
                         print(f"✅ Plot saved to {parsed.out_path}")
+                    elif show_window:
+                        print(f"🖼️  Displaying plot window …")
+                        display_plot_window(data, loop)
                     else:
                         print(f"📡 Plot bytes available ({len(data)} bytes); use --out to save locally.")
                 await self.plugin.plot(parsed.request_payload, on_header, on_binary)
                 return EXIT_SUCCESS
             if parsed.request_type == "view.export":
-                if parsed.out_path is None:
-                    print("ℹ️  No --out specified; CSV bytes will stream over WebSocket if connected.")
-                else:
-                    parsed.out_path.parent.mkdir(parents=True, exist_ok=True)
-                    if parsed.out_path.exists():
-                        parsed.out_path.unlink()
-                bytes_written = 0
-                async def on_start(message: Dict[str, Any]) -> None:
-                    filename = parsed.out_path or message.get("filename")
-                    print(f"📁 Export starting → {filename}")
-                async def on_chunk(data: bytes) -> None:
-                    nonlocal bytes_written
-                    bytes_written += len(data)
-                    if parsed.out_path:
-                        with parsed.out_path.open("ab") as fh:
-                            fh.write(data)
-                async def on_end(message: Dict[str, Any]) -> None:
-                    if parsed.out_path:
-                        print(f"✅ Export complete ({bytes_written} bytes) → {parsed.out_path}")
-                    else:
-                        print(f"📡 Export ready: {bytes_written} bytes streamed via WS. sha256={message.get('sha256')}")
-                await self.plugin.export(parsed.request_payload, on_start, on_chunk, on_end)
+                if self._interactive:
+                    print("🚚 Export running in background …")
+                    self._start_background_task(self._export_dataset(parsed, background=True), f"export {parsed.request_payload.get('datasetKey')}")
+                    return EXIT_SUCCESS
+                await self._export_dataset(parsed, background=False)
                 return EXIT_SUCCESS
         except PluginMessageError as exc:
             handle_cli_plugin_error(exc.payload)
@@ -608,6 +628,70 @@ class ArgoCLIApp:
             if code != EXIT_SUCCESS:
                 exit_code = code
         return exit_code
+
+    def _start_background_task(self, coro: Awaitable[None], label: str) -> None:
+        task = asyncio.create_task(coro)
+        self._background_tasks.add(task)
+
+        def _done(t: asyncio.Task[Any]) -> None:
+            self._background_tasks.discard(t)
+            try:
+                t.result()
+            except PluginMessageError as exc:
+                handle_cli_plugin_error(exc.payload)
+            except Exception as exc:
+                print(f"❌ Background {label} failed: {exc}")
+
+        task.add_done_callback(_done)
+
+    async def _export_dataset(self, parsed: ParsedCommand, *, background: bool) -> None:
+        out_path = parsed.out_path
+        if out_path:
+            out_path.parent.mkdir(parents=True, exist_ok=True)
+            if out_path.exists():
+                out_path.unlink()
+        bytes_written = 0
+
+        async def on_start(message: Dict[str, Any]) -> None:
+            filename = out_path or message.get("filename")
+            print(f"📁 Export starting → {filename}")
+
+        async def on_chunk(data: bytes) -> None:
+            nonlocal bytes_written
+            bytes_written += len(data)
+            if out_path:
+                await asyncio.to_thread(_append_chunk, out_path, data)
+
+        async def on_end(message: Dict[str, Any]) -> None:
+            if out_path:
+                print(f"✅ Export complete ({bytes_written} bytes) → {out_path}")
+            else:
+                print(f"📡 Export ready: {bytes_written} bytes streamed via WS. sha256={message.get('sha256')}")
+
+        try:
+            await self.plugin.export(parsed.request_payload, on_start, on_chunk, on_end)
+        except PluginMessageError as exc:
+            if background:
+                handle_cli_plugin_error(exc.payload)
+            else:
+                raise
+        except Exception as exc:
+            if background:
+                print(f"❌ {exc}")
+            else:
+                raise
+
+    async def wait_background_tasks(self) -> None:
+        if not self._background_tasks:
+            return
+        await asyncio.gather(*list(self._background_tasks), return_exceptions=True)
+
+    def _configure_readline(self) -> None:
+        try:
+            self._readline.parse_and_bind("set editing-mode emacs")
+            self._readline.parse_and_bind("tab: complete")
+        except Exception:  # pragma: no cover - readline/pyreadline differences
+            pass
 
 
 def handle_cli_plugin_error(error: Dict[str, Any]) -> None:
@@ -662,6 +746,66 @@ def render_view_help(topic: Optional[str]) -> None:
     print("Available /view commands:")
     for key in sorted(HELP_ENTRIES.keys()):
         print(f"  - {HELP_ENTRIES[key]}")
+
+
+def display_plot_window(png_bytes: bytes, loop: Optional[asyncio.AbstractEventLoop] = None) -> None:
+    try:
+        import matplotlib.pyplot as plt
+        import matplotlib.image as mpimg
+    except Exception as exc:  # pragma: no cover - optional GUI dependency
+        print(f"⚠️  Unable to display plot window (matplotlib GUI unavailable): {exc}")
+        return
+
+    from io import BytesIO
+
+    try:
+        image = mpimg.imread(BytesIO(png_bytes), format="png")
+    except Exception as exc:
+        print(f"⚠️  Failed to decode plot image: {exc}")
+        return
+
+    try:
+        plt.rcParams["figure.raise_window"] = False
+    except Exception:
+        pass
+
+    try:
+        plt.ion()
+    except Exception:
+        pass
+
+    fig, ax = plt.subplots()
+    ax.imshow(image)
+    ax.axis("off")
+
+    manager = getattr(fig.canvas, "manager", None)
+    if manager and hasattr(manager, "set_window_title"):
+        try:
+            manager.set_window_title("odbargo-view plot")
+        except Exception:
+            pass
+
+    try:
+        plt.show(block=False)
+        try:
+            fig.canvas.flush_events()
+        except Exception:
+            pass
+        plt.pause(0.001)
+    except Exception as exc:
+        print(f"⚠️  Unable to show plot window: {exc}")
+        return
+
+    if loop is not None:
+        def _pump() -> None:
+            try:
+                if plt.get_fignums():
+                    plt.pause(0.05)
+                    loop.call_later(0.1, _pump)
+            except Exception:
+                pass
+
+        loop.call_later(0.1, _pump)
 
 
 def render_preview(response: Dict[str, Any], limit_cli: int = 20) -> None:
@@ -725,6 +869,7 @@ def main() -> None:
         try:
             await app.run_repl()
         finally:
+            await app.wait_background_tasks()
             if app._ws_server:
                 app._ws_server.close()
                 await app._ws_server.wait_closed()

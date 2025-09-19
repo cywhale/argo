@@ -18,8 +18,8 @@ EXIT_PLUGIN = 10
 HELP_ENTRIES = {
     "open": "/view open <path> [as <key>] - load a NetCDF file and register a dataset key",
     "list_vars": "/view list_vars [<key>] - list coordinates and variables for the dataset",
-    "preview": "/view preview <key> [as <subset>] [--cols ... --filter ...] - show a bounded tabular preview and optionally save a subset",
-    "plot": "/view plot <key> <timeseries|profile|map> [--x ... --y ... --out ...] - render a matplotlib plot",
+    "preview": "/view preview <key> [as <subset>] [--cols --filter --bbox --start --end] - tabular preview with optional subset registration",
+    "plot": "/view plot <key> <timeseries|profile|map> [--x --y --bbox --start --end --cmap --out] - render matplotlib charts (maps default to LONGITUDE/LATITUDE axes)",
     "export": "/view export <key> csv [--cols ... --filter ... --out ...] - stream a filtered CSV export",
     "close": "/view close [<key>] - close and release a dataset from memory",
     "help": "/view help [command] - show available /view commands and usage",
@@ -147,7 +147,29 @@ def parse_slash_command(raw: str, fallback_dataset: Optional[str]) -> ParsedComm
                 raise ValueError(f"Unexpected token '{token}'")
             idx += 1
             name = token[2:]
-            if name in {"filter", "json-filter", "order", "cols", "cursor", "size", "dpi", "title", "x", "y", "z", "limit", "out", "bins", "filename"}:
+            if name in {
+                "filter",
+                "json-filter",
+                "order",
+                "cols",
+                "cursor",
+                "size",
+                "dpi",
+                "title",
+                "x",
+                "y",
+                "z",
+                "limit",
+                "out",
+                "bins",
+                "filename",
+                "bbox",
+                "box",
+                "start",
+                "end",
+                "cmap",
+                "order",
+            }:
                 value = take()
                 if name == "filter":
                     options.setdefault("filter", {})["dsl"] = value
@@ -181,6 +203,21 @@ def parse_slash_command(raw: str, fallback_dataset: Optional[str]) -> ParsedComm
                     options.setdefault("style", {})["bins"] = parse_bins(value)
                 elif name == "filename":
                     options["filename"] = value
+                elif name in {"bbox", "box"}:
+                    parts = [piece.strip() for piece in value.split(",") if piece.strip()]
+                    if len(parts) != 4:
+                        raise ValueError("--bbox/--box expects four comma-separated values")
+                    try:
+                        bbox_vals = [float(piece) for piece in parts]
+                    except ValueError as exc:
+                        raise ValueError("--bbox/--box values must be numeric") from exc
+                    options["bbox"] = bbox_vals
+                elif name == "start":
+                    options["start"] = value
+                elif name == "end":
+                    options["end"] = value
+                elif name == "cmap":
+                    options.setdefault("style", {})["cmap"] = value
             elif name in {"invert-y", "no-invert-y", "grid", "echo-json"}:
                 if name == "invert-y":
                     options.setdefault("style", {})["invert_y"] = True
