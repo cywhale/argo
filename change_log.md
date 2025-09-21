@@ -51,3 +51,12 @@
         -- add PyInstaller one-file build commands for CLI and view plugin, keeping heavy deps in the companion binary
         -- make view plugin optional (`--plugin auto|view|none`), support explicit binaries, and emit clear messaging when disabled or missing
 #### ver 0.2.3 fix matplotlib plot window cannot open (main CLI-VIEW devision and connection/n1)
+#### ver 0.2.4 viewer grouping + stability + debug flag
+        -- add `--group-by` with discrete keys, numeric binning (`PRES:<binwidth>`), and time resampling (`TIME:<freq>`);
+           support `--agg mean|median|max|min|count`, capped legend series via `style.max_series`
+        -- allow plotting against coordinate/dimension columns even when subset projection is narrowed; persist coords by default unless `--trim-dims`
+        -- enforce `--limit` consistently across preview/plot/export; preview pagination reuses last displayed columns across `--cursor`
+        -- single-port WS bridge supports viewer self-registration; robust handover to a single plugin reader (no concurrent recv)
+        -- plot/export binary relay hardened; CSV streaming via `file_start` → binary chunks → `file_end` with SHA-256
+        -- add env `ODBARGO_DEBUG=1` to enable CLI⇄plugin debug breadcrumbs (suppressed by default)
+        -- README_odbargo-view.md refreshed with new options and examples

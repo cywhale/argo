@@ -169,6 +169,8 @@ def parse_slash_command(raw: str, fallback_dataset: Optional[str]) -> ParsedComm
                 "end",
                 "cmap",
                 "order",
+                "group-by",
+                "agg",
             }:
                 value = take()
                 if name == "filter":
@@ -218,7 +220,11 @@ def parse_slash_command(raw: str, fallback_dataset: Optional[str]) -> ParsedComm
                     options["end"] = value
                 elif name == "cmap":
                     options.setdefault("style", {})["cmap"] = value
-            elif name in {"invert-y", "no-invert-y", "grid", "echo-json"}:
+                elif name == "group-by":
+                    options["groupBy"] = value
+                elif name == "agg":
+                    options["agg"] = value                
+            elif name in {"invert-y", "no-invert-y", "grid", "echo-json", "trim-dims"}:
                 if name == "invert-y":
                     options.setdefault("style", {})["invert_y"] = True
                 elif name == "no-invert-y":
@@ -227,6 +233,8 @@ def parse_slash_command(raw: str, fallback_dataset: Optional[str]) -> ParsedComm
                     options.setdefault("style", {})["grid"] = True
                 elif name == "echo-json":
                     echo_json = True
+                elif name == "trim-dims":
+                    options["trimDimensions"] = True
             else:
                 raise ValueError(f"Unknown option --{name}")
 

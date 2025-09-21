@@ -12,7 +12,6 @@ import argparse
 import asyncio
 import json
 import math
-import os
 import shlex
 import ssl
 import sys
@@ -30,6 +29,8 @@ except ImportError:  # pragma: no cover - Windows fallback
         readline = None  # type: ignore
 
 import websockets
+import os
+ODBARGO_DEBUG = os.getenv("ODBARGO_DEBUG", "0") not in ("", "0", "false", "False")
 
 from argo_cli import (
     HELP_ENTRIES,
@@ -44,11 +45,9 @@ def _append_chunk(path: Path, data: bytes) -> None:
     with path.open("ab") as fh:
         fh.write(data)
 
-
 # ---------------------------------------------------------------------------
 # Download helpers (legacy functionality)
 # ---------------------------------------------------------------------------
-
 
 async def download_with_retry(wmo_list: List[int], output_path: str, retries: int = 3, delay: int = 10, force_insecure: bool = False) -> bool:
     for attempt in range(retries):
@@ -103,6 +102,42 @@ def download_argo_data(wmo_list: List[int], output_path: str, insecure: bool = F
 # Plugin bridge
 # ---------------------------------------------------------------------------
 
+# --- Plugin peer (WS) registration state ---
+PLUGIN_AUTH_TOKEN = os.environ.get("ODBARGO_PLUGIN_TOKEN", "odbargoplot")  # optional shared secret
+_plugin_ws: Optional[websockets.WebSocketServerProtocol] = None
+
+def _ws_is_open(conn) -> bool:
+    """
+    websockets (server side) uses a ServerConnection that does NOT expose `.open`.
+    Use `.closed` instead; when False, the connection is open.
+    """
+    if conn is None:
+        return False
+    try:
+        closed = getattr(conn, "closed", None)
+        if closed is None:
+            # Be permissive: if attribute doesn't exist, assume open.
+            return True
+        if isinstance(closed, bool):
+            return not closed
+        # Some versions expose a close state object; treat truthy as 'closed'
+        return not bool(closed)
+    except Exception:
+        return False
+
+def plugin_ws_available() -> bool:
+    return _ws_is_open(_plugin_ws)
+
+async def plugin_ws_send_json(obj: dict) -> None:
+    # forward control frames to the plugin WS peer
+    if not plugin_ws_available():
+        raise RuntimeError("Plugin WS not available")
+    await _plugin_ws.send(json.dumps(obj))
+
+async def plugin_ws_send_binary(data: bytes) -> None:
+    if not plugin_ws_available():
+        raise RuntimeError("Plugin WS not available")
+    await _plugin_ws.send(data)
 
 class PluginMessageError(Exception):
     def __init__(self, payload: Dict[str, Any]):
@@ -352,7 +387,65 @@ def parse_numeric_list(value: str) -> List[int]:
 # ---------------------------------------------------------------------------
 # CLI application
 # ---------------------------------------------------------------------------
+class _LocalClientSink:
+    """
+    Minimal in-process stand-in for a WebSocket client.
+    Used by slash commands to reuse _handle_view_request() and the plugin bridges.
 
+    .send(...) is awaited by server code and we capture:
+      - JSON messages (strings) into self.json_messages
+      - Binary frames (bytes) into self.binary (for plot/export)
+    .wait_done() completes when we get a terminal JSON (dataset_opened/vars/
+    preview_result/dataset_closed/file_end) or after a single plot binary.
+    """
+    def __init__(self, request_id: str, expect_binary: bool = False) -> None:
+        self.request_id = request_id
+        self.expect_binary = expect_binary
+        self.json_messages: list[dict] = []
+        self.binary: bytearray | None = bytearray() if expect_binary else None
+        self._done = asyncio.Event()
+        self._saw_plot_header = False
+
+    async def send(self, payload) -> None:
+        # Server code calls this with either str(JSON) or bytes
+        if isinstance(payload, (bytes, bytearray)):
+            if self.binary is not None:
+                self.binary += bytes(payload)
+            # For plots we expect exactly one binary frame → done
+            self._done.set()
+            return
+
+        if isinstance(payload, str):
+            try:
+                obj = json.loads(payload)
+            except Exception:
+                return
+            self.json_messages.append(obj)
+
+            t = obj.get("type")
+            rid = obj.get("requestId")
+
+            # terminal error → unblock immediately
+            if t == "error" and rid == self.request_id:
+                self._done.set()
+                return
+
+            if rid != self.request_id:
+                return
+
+            # Terminal messages
+            if t in ("view.dataset_opened", "view.vars", "view.preview_result", "view.dataset_closed"):
+                self._done.set()
+            elif t == "plot_blob":
+                self._saw_plot_header = True
+            elif t == "file_end":
+                self._done.set()
+
+    async def wait_done(self, timeout: float = 30.0) -> None:
+        try:
+            await asyncio.wait_for(self._done.wait(), timeout=timeout)
+        except asyncio.TimeoutError:
+            pass
 
 class ArgoCLIApp:
     def __init__(self, port: int, insecure: bool, plugin_mode: str, plugin_binary: Optional[str]) -> None:
@@ -361,28 +454,111 @@ class ArgoCLIApp:
         self.plugin = PluginClient(mode=plugin_mode, binary_override=plugin_binary)
         self.frontend_connected = asyncio.Event()
         self._last_dataset_key: Optional[str] = None
+        self._preview_state: Dict[str, List[str]] = {}  # datasetKey -> last displayed preview columns
         self._job_counter = 0
         self._ws_server: Optional[asyncio.AbstractServer] = None
         self._readline = readline if 'readline' in globals() else None
         self._interactive = False
         self._background_tasks: Set[asyncio.Task[Any]] = set()
+        # --- WS plugin self-registration state ---
+        self._plugin_ws: Optional[websockets.WebSocketServerProtocol] = None
+        self._plugin_caps: Dict[str, Any] = {}
+        self._plugin_pending: Dict[str, Dict[str, Any]] = {}  # msgId -> {"client_ws":..., "kind":..., "expect_binary": bool}
+        self._plugin_reader_task: Optional[asyncio.Task[Any]] = None
+        self._plugin_token = os.environ.get("ODBARGO_PLUGIN_TOKEN", "")        
         if self._readline:
             self._configure_readline()
 
     # ----------------------------- WS layer -----------------------------
+    def _ws_is_open(self, conn) -> bool:
+        """
+        websockets ≥12 uses ServerConnection on the server side, which does not have `.open`.
+        Use `.closed` instead (False means open).
+        """
+        if conn is None:
+            return False
+        # Some versions expose .closed as a bool, others as asyncio.Future-like.
+        try:
+            closed = getattr(conn, "closed", None)
+            if closed is None:
+                return True  # no 'closed' attribute → assume open
+            if isinstance(closed, bool):
+                return not closed
+            # If it's an awaitable/future, 'done()' indicates it is closed.
+            return not closed
+        except Exception:
+            return False
+    
+    def _maybe_reprompt(self) -> None:
+        # Repaint the REPL prompt immediately (no newline) if we’re in interactive mode.
+        try:
+            if getattr(self, "_interactive", False):
+                sys.stdout.write("argo> ")
+                sys.stdout.flush()
+        except Exception:
+            pass    
+
     async def run_server(self) -> None:
         self._ws_server = await websockets.serve(self._ws_handler, "localhost", self.port)
         print(f"[Argo-CLI] WebSocket listening on ws://localhost:{self.port}")
 
     async def _ws_handler(self, websocket: websockets.WebSocketServerProtocol) -> None:
+        """
+        Per-connection handler. For normal frontend/clients, we parse JSON and dispatch.
+        For a WS-registered plugin, we **handover** this connection to _plugin_reader(),
+        and DO NOT read from it here anymore (avoids concurrent recv()).
+        """
         try:
-            async for raw in websocket:
+            while True:
+                raw = await websocket.recv()
+
+                # Frontend shouldn't send binary; plugin will, but after registration
+                if isinstance(raw, (bytes, bytearray)):
+                    # Ignore stray binary from non-plugin connections
+                    continue
+
                 try:
                     data = json.loads(raw)
                 except json.JSONDecodeError:
                     await websocket.send(json.dumps({"type": "error", "code": "BAD_JSON", "message": "Invalid JSON"}))
                     continue
+
+                # --- Plugin self-registration happens here (handover after ack) ---
+                if data.get("type") == "plugin.register":
+                    token = data.get("token", "")
+                    if self._plugin_token and token != self._plugin_token:
+                        await websocket.send(json.dumps({
+                            "type": "plugin.register_err",
+                            "code": "UNAUTHORIZED",
+                            "message": "Invalid plugin token",
+                        }))
+                        print("[View] WS-plugin register: rejected (bad token)")
+                        continue
+
+                    # mark this socket as the plugin peer
+                    self._plugin_ws = websocket
+                    self._plugin_caps = data.get("capabilities", {}) or {}
+                    await websocket.send(json.dumps({
+                        "type": "plugin.register_ok",
+                        "pluginProtocolVersion": data.get("pluginProtocolVersion", "1.0"),
+                    }))
+                    print("[View] WS-plugin registered; caps =", self._plugin_caps)
+                    self._maybe_reprompt()
+
+                    # handover: only _plugin_reader() reads this socket from now on
+                    try:
+                        await self._plugin_reader(websocket)
+                    finally:
+                        if self._plugin_ws is websocket:
+                            self._plugin_ws = None
+                            self._plugin_caps = {}
+                            self._plugin_pending.clear()
+                            print("[View] WS-plugin disconnected; cleared state")
+                    return  # end handler for this connection
+
+                # normal client message
                 await self._dispatch_ws_message(websocket, data)
+
         except websockets.ConnectionClosed:  # pragma: no cover - runtime
             return
 
@@ -400,13 +576,197 @@ class ArgoCLIApp:
             }
             await websocket.send(json.dumps(response))
             return
+
+        # --- 💡 Plugin self-registration over the same WS server ---
+        if msg_type == "plugin.register":
+            token = data.get("token", "")
+            if self._plugin_token and token != self._plugin_token:
+                await websocket.send(json.dumps({
+                    "type": "plugin.register_err",
+                    "code": "UNAUTHORIZED",
+                    "message": "Invalid plugin token",
+                }))
+                return
+            # Mark this connection as the plugin peer
+            self._plugin_ws = websocket
+            self._plugin_caps = data.get("capabilities", {})
+            # Launch a reader task dedicated to this plugin connection
+            if self._plugin_reader_task is None or self._plugin_reader_task.done():
+                self._plugin_reader_task = asyncio.create_task(self._plugin_reader(websocket))
+            await websocket.send(json.dumps({
+                "type": "plugin.register_ok",
+                "pluginProtocolVersion": data.get("pluginProtocolVersion", "1.0"),
+            }))
+            return
+                
         if msg_type == "start_job":
             await self._handle_download_request(websocket, data)
             return
         if msg_type and msg_type.startswith("view."):
             await self._handle_view_request(websocket, data)
             return
+             
         await websocket.send(json.dumps({"type": "error", "code": "UNKNOWN_MSG", "message": f"Unsupported type {msg_type}"}))
+
+    async def _plugin_reader(self, websocket: websockets.WebSocketServerProtocol) -> None:
+        """
+        Sole reader for the WS-registered plugin socket.
+        Routes plugin control frames + following binary frames back to the requesting client.
+        """
+        try:
+            async for raw in websocket:
+                # ---------- Binary from plugin → deliver to whichever request expects it ----------
+                if isinstance(raw, (bytes, bytearray)):
+                    # find the earliest pending that expects binary
+                    msg_id = None
+                    client_ws = None
+                    for k, rec in list(self._plugin_pending.items()):
+                        if rec.get("expect_binary"):
+                            msg_id = k
+                            client_ws = rec.get("client_ws")
+                            break
+
+                    if client_ws is not None:
+                        # forward the binary verbatim to the waiting client
+                        await client_ws.send(raw)
+
+                        # for plots we’re done after a single binary frame
+                        if self._plugin_pending.get(msg_id, {}).get("kind") == "plot":
+                            self._plugin_pending.pop(msg_id, None)
+
+                        # optional debug breadcrumb
+                        print(f"[View] → forwarded binary ({'plot' if msg_id else 'unknown'})")
+                    else:
+                        print("[View] plugin sent binary but no pending request expects it")
+                    continue
+
+                # ---------- Text JSON from plugin ----------
+                try:
+                    msg = json.loads(raw)
+                except json.JSONDecodeError:
+                    print("[View] plugin sent bad JSON; ignored")
+                    continue
+
+                op = msg.get("op")
+                msg_id = msg.get("msgId")
+                if not op or not msg_id:
+                    # ignore non-framed noise
+                    continue
+
+                # "debug" messages are useful even if there is no pending waiter
+                if op == "debug":
+                    if ODBARGO_DEBUG:
+                        mtxt = msg.get("message", "")
+                        if msg_id:
+                            print(f"[View][debug] [{msg_id}] {mtxt}")
+                        else:
+                            print(f"[View][debug] {mtxt}")
+                    # do not require a pending waiter for debug frames
+                    continue
+                
+                rec = self._plugin_pending.get(msg_id)
+                client_ws = rec.get("client_ws") if rec else None
+                if client_ws is None:
+                    # don’t crash when a late message arrives after the waiter was cleared
+                    print(f"[View] plugin op {op} for unknown msgId {msg_id}; ignored")
+                    continue
+
+                # ---------- Map plugin ops back to WS 'type' ----------
+                if op == "open_dataset.ok":
+                    await client_ws.send(json.dumps({
+                        "type": "view.dataset_opened",
+                        "requestId": msg_id,
+                        "datasetKey": msg.get("datasetKey"),
+                        "summary": msg.get("summary", {}),
+                    }))
+                    self._plugin_pending.pop(msg_id, None)
+                    print("[View] ← open_dataset.ok routed")
+
+                elif op == "list_vars.ok":
+                    await client_ws.send(json.dumps({
+                        "type": "view.vars",
+                        "requestId": msg_id,
+                        "datasetKey": msg.get("datasetKey"),
+                        "coords": msg.get("coords", []),
+                        "vars": msg.get("vars", []),
+                    }))
+                    self._plugin_pending.pop(msg_id, None)
+                    print("[View] ← list_vars.ok routed")
+
+                elif op == "preview.ok":
+                    await client_ws.send(json.dumps({
+                        "type": "view.preview_result",
+                        "requestId": msg_id,
+                        "datasetKey": msg.get("datasetKey"),
+                        "columns": msg.get("columns", []),
+                        "rows": msg.get("rows", []),
+                        "limitHit": msg.get("limitHit", False),
+                        "nextCursor": msg.get("nextCursor"),
+                    }))
+                    self._plugin_pending.pop(msg_id, None)
+                    print("[View] ← preview.ok routed")
+
+                elif op == "dataset_closed":
+                    await client_ws.send(json.dumps({
+                        "type": "view.dataset_closed",
+                        "requestId": msg_id,
+                        "datasetKey": msg.get("datasetKey"),
+                    }))
+                    self._plugin_pending.pop(msg_id, None)
+                    print("[View] ← dataset_closed routed")
+
+                elif op == "plot_blob":
+                    # header first; the PNG bytes will arrive next as a binary WS frame
+                    if rec is not None:
+                        rec["expect_binary"] = True
+                    await client_ws.send(json.dumps({
+                        "type": "plot_blob",
+                        "requestId": msg_id,
+                        "contentType": msg.get("contentType", "image/png"),
+                        "size": msg.get("size"),
+                    }))
+                    print("[View] ← plot_blob header routed; awaiting binary.")
+
+                elif op == "file_start":
+                    # CSV export starts – mark this waiter as expecting binary chunks
+                    if rec is not None:
+                        rec["expect_binary"] = True
+                    await client_ws.send(json.dumps({
+                        "type": "file_start",
+                        "requestId": msg_id,
+                        "contentType": msg.get("contentType", "text/csv"),
+                        "filename": msg.get("filename"),
+                    }))
+                    # optional: print minimal breadcrumb (binary chunks are forwarded in the binary branch)
+
+                elif op == "file_chunk":
+                    # control marker only; the actual bytes arrive as a separate binary frame
+                    pass
+
+                elif op == "file_end":
+                    await client_ws.send(json.dumps({
+                        "type": "file_end",
+                        "requestId": msg_id,
+                        "sha256": msg.get("sha256"),
+                        "size": msg.get("size"),
+                    }))
+                    self._plugin_pending.pop(msg_id, None)
+                    print("[View] ← file_end routed")
+
+                elif op == "error":
+                    await client_ws.send(json.dumps({
+                        "type": "error",
+                        "requestId": msg_id,
+                        "code": msg.get("code", "PLUGIN_ERROR"),
+                        "message": msg.get("message", "Plugin error"),
+                        "hint": msg.get("hint"),
+                        "details": msg.get("details"),
+                    }))
+                    self._plugin_pending.pop(msg_id, None)
+                    print("[View] ← error routed:", msg.get("code"))
+
+        except websockets.ConnectionClosed:  # plugin went away
+            pass
 
     async def _handle_download_request(self, websocket: websockets.WebSocketServerProtocol, data: Dict[str, Any]) -> None:
         job_id = data.get("jobId") or f"job-{int(time.time())}"
@@ -446,6 +806,44 @@ class ArgoCLIApp:
     async def _handle_view_request(self, websocket: websockets.WebSocketServerProtocol, data: Dict[str, Any]) -> None:
         request_id = data.get("requestId")
         dataset_key = data.get("datasetKey")
+
+        # If a WS-registered plugin is available, forward to it.
+        # if self._plugin_ws is not None and self._plugin_ws.open:
+        if self._ws_is_open(self._plugin_ws):
+            t = data.get("type")
+            op_map = {
+                "view.open_dataset": "open_dataset",
+                "view.list_vars": "list_vars",
+                "view.preview": "preview",
+                "view.close_dataset": "close_dataset",
+                "view.plot": "plot",
+                "view.export": "export",
+            }
+            op = op_map.get(t)
+            if not op:
+                await websocket.send(json.dumps({"type": "error", "requestId": request_id, "code": "UNKNOWN_MSG", "message": f"Unsupported type {t}"}))
+                return
+
+            payload = {k: v for k, v in data.items() if k not in {"type", "requestId"}}
+            payload.update({"op": op, "msgId": request_id})
+
+            # remember who should get the responses (and whether to expect binary)
+            kind = "plot" if t == "view.plot" else ("export" if t == "view.export" else "simple")
+            self._plugin_pending[request_id] = {"client_ws": websocket, "kind": kind, "expect_binary": False}
+
+            try:
+                await self._plugin_ws.send(json.dumps(payload))
+                print(f"[View] → forwarded to WS-plugin: op={op} msgId={request_id}")
+            except Exception as exc:
+                self._plugin_pending.pop(request_id, None)
+                await websocket.send(json.dumps({
+                    "type": "error",
+                    "requestId": request_id,
+                    "code": "PLUGIN_UNAVAILABLE",
+                    "message": f"WS plugin send failed: {exc}",
+                }))
+            return
+
         try:
             if data["type"] == "view.open_dataset":
                 response = await self.plugin.open_dataset({
@@ -628,6 +1026,32 @@ class ArgoCLIApp:
         except Exception as exc:
             print(f"❌ {exc}")
 
+    async def invoke_view_request_from_cli(
+        self,
+        data: dict,
+        *,
+        want_binary: bool = False,
+        timeout: float = 30.0,
+    ) -> tuple[list[dict], bytes | None]:
+        """
+        Run a view.* request through the normal WS-dispatch pipeline, but keep I/O in-process.
+        Returns (json_messages, binary_bytes_or_None).
+        """
+        request_id = data.get("requestId") or f"cli-{int(time.time()*1000)}"
+        data["requestId"] = request_id
+
+        sink = _LocalClientSink(request_id, expect_binary=want_binary)
+
+        # This reuses _handle_view_request(), which already knows how to:
+        #   - use the WS-registered plugin if available (in your newer build), OR
+        #   - fall back to stdio PluginClient
+        await self._handle_view_request(sink, data)
+
+        await sink.wait_done(timeout=timeout)
+
+        bin_bytes = bytes(sink.binary) if sink.binary is not None and len(sink.binary) else None
+        return (sink.json_messages, bin_bytes)
+
     async def execute_slash_command(self, command: str) -> int:
         try:
             parsed = parse_slash_command(command, self._last_dataset_key)
@@ -640,61 +1064,140 @@ class ArgoCLIApp:
             print(json.dumps(payload, indent=2))
         try:
             if parsed.request_type == "view.open_dataset":
-                response = await self.plugin.open_dataset(parsed.request_payload)
-                self._last_dataset_key = parsed.request_payload["datasetKey"]
-                render_dataset_summary(response.get("summary", {}))
+                req = dict(parsed.request_payload)
+                req["type"] = "view.open_dataset"
+                msgs, _ = await self.invoke_view_request_from_cli(req, want_binary=False)
+                # find dataset_opened
+                opened = next((m for m in msgs if m.get("type") == "view.dataset_opened"), None)
+                if not opened:
+                    print("⚠️  No response from viewer")
+                    return EXIT_PLUGIN
+                self._last_dataset_key = opened.get("datasetKey") or parsed.request_payload["datasetKey"]
+                render_dataset_summary(opened.get("summary", {}))
                 return EXIT_SUCCESS
             if parsed.request_type == "view.list_vars":
-                response = await self.plugin.list_vars(parsed.request_payload)
-                render_variable_summary(response)
+                req = dict(parsed.request_payload); req["type"] = "view.list_vars"
+                msgs, _ = await self.invoke_view_request_from_cli(req, want_binary=False)
+                listing = next((m for m in msgs if m.get("type") == "view.vars"), None)
+                if not listing:
+                    print("⚠️  No response from viewer")
+                    return EXIT_PLUGIN
+                # simple pretty print
+                coords = listing.get("coords", [])
+                vars_  = listing.get("vars", [])
+                print("Coords:")
+                for c in coords[:50]:
+                    nm, dt, sz = c.get("name"), c.get("dtype"), c.get("size")
+                    print(f"  - {nm} [{dt}] (size={sz})")
+                print("Vars:")
+                for v in vars_[:200]:
+                    nm, dt, shp = v.get("name"), v.get("dtype"), v.get("shape")
+                    print(f"  - {nm} [{dt}] shape={shp}")
                 return EXIT_SUCCESS
             if parsed.request_type == "view.help":
                 render_view_help(parsed.request_payload.get("topic"))
                 return EXIT_SUCCESS
             if parsed.request_type == "view.preview":
-                response = await self.plugin.preview(parsed.request_payload)
-                render_preview(response)
-                subset_key = response.get("subsetKey")
-                if subset_key:
-                    self._last_dataset_key = subset_key
-                else:
-                    self._last_dataset_key = parsed.request_payload["datasetKey"]
+                req = dict(parsed.request_payload); req["type"] = "view.preview"
+                if parsed.request_payload.get("limit") is not None:
+                    req["limit"] = int(parsed.request_payload["limit"])  
+                if parsed.request_payload.get("trimDimensions"):
+                    req["trim-dims"] = True
+
+                msgs, _ = await self.invoke_view_request_from_cli(req, want_binary=False)
+                result = next((m for m in msgs if m.get("type") == "view.preview_result"), None)
+                if not result:
+                    print("⚠️  No response from viewer")
+                    return EXIT_PLUGIN
+                render_preview(result)
+                subset_key = result.get("subsetKey")
+                self._last_dataset_key = subset_key or parsed.request_payload.get("datasetKey")
                 return EXIT_SUCCESS
             if parsed.request_type == "view.close_dataset":
-                await self.plugin.close_dataset(parsed.request_payload)
-                if self._last_dataset_key == parsed.request_payload["datasetKey"]:
+                req = dict(parsed.request_payload); req["type"] = "view.close_dataset"
+                msgs, _ = await self.invoke_view_request_from_cli(req, want_binary=False)
+                closed = next((m for m in msgs if m.get("type") == "view.dataset_closed"), None)
+                if self._last_dataset_key == parsed.request_payload.get("datasetKey"):
                     self._last_dataset_key = None
-                print(f"🧹 Closed dataset {parsed.request_payload['datasetKey']}")
+                print(f"🧹 Closed dataset {parsed.request_payload.get('datasetKey')}")
                 return EXIT_SUCCESS
             if parsed.request_type == "view.plot":
+                req = dict(parsed.request_payload); req["type"] = "view.plot"
+                gb = parsed.request_payload.get("groupBy")
+                if gb:
+                    # ensure list[str]
+                    if isinstance(gb, str):
+                        gb = [s.strip() for s in gb.split(",") if s.strip()]
+                    req["groupBy"] = gb
+                if parsed.request_payload.get("agg"):
+                    req["agg"] = parsed.request_payload["agg"]                 
+                if parsed.request_payload.get("limit") is not None:
+                    req["limit"] = int(parsed.request_payload["limit"])
+
                 show_window = parsed.out_path is None
                 if not show_window:
                     parsed.out_path.parent.mkdir(parents=True, exist_ok=True)
                 else:
                     print("🖼️  Plot will open in a window (use --out to save instead).")
-                loop = asyncio.get_running_loop()
-                async def on_header(message: Dict[str, Any]) -> None:
-                    size = message.get("size")
-                    ctype = message.get("contentType")
+
+                msgs, png = await self.invoke_view_request_from_cli(req, want_binary=True)
+
+                # If viewer returned an error, show it and exit immediately (no timeout)
+                err = next((m for m in msgs if m.get("type") == "error"), None)
+                if err:
+                    code = err.get("code", "PLOT_FAIL")
+                    msg  = err.get("message", "Plot failed")
+                    hint = err.get("hint")
+                    print(f"❌ {code}: {msg}" + (f" — {hint}" if hint else ""))
+                    return EXIT_OUTPUT
+
+                hdr = next((m for m in msgs if m.get("type") == "plot_blob"), None)
+                if hdr:
+                    size = hdr.get("size"); ctype = hdr.get("contentType")
                     print(f"🖼️  Plot ready ({ctype}, {size} bytes)")
-                async def on_binary(data: bytes) -> None:
-                    if parsed.out_path:
-                        parsed.out_path.write_bytes(data)
-                        print(f"✅ Plot saved to {parsed.out_path}")
-                    elif show_window:
-                        print(f"🖼️  Displaying plot window …")
-                        display_plot_window(data, loop)
-                    else:
-                        print(f"📡 Plot bytes available ({len(data)} bytes); use --out to save locally.")
-                await self.plugin.plot(parsed.request_payload, on_header, on_binary)
+
+                if not png:
+                    print("⚠️  No plot bytes received")
+                    return EXIT_OUTPUT
+
+                if parsed.out_path:
+                    parsed.out_path.write_bytes(png)
+                    print(f"✅ Plot saved to {parsed.out_path}")
+                elif show_window:
+                    loop = asyncio.get_running_loop()
+                    print(f"🖼️  Displaying plot window …")
+                    display_plot_window(png, loop)
+                else:
+                    print(f"📡 Plot bytes available ({len(png)} bytes); use --out to save locally.")
                 return EXIT_SUCCESS
+
             if parsed.request_type == "view.export":
-                if self._interactive:
-                    print("🚚 Export running in background …")
-                    self._start_background_task(self._export_dataset(parsed, background=True), f"export {parsed.request_payload.get('datasetKey')}")
-                    return EXIT_SUCCESS
-                await self._export_dataset(parsed, background=False)
+                # Build a WS-style request and run it through the same bridge used by WS clients
+                req = dict(parsed.request_payload)
+                req["type"] = "view.export"
+                if parsed.request_payload.get("limit") is not None:
+                    req["limit"] = int(parsed.request_payload["limit"])                
+
+                # Accumulate all binary frames until file_end
+                msgs, data = await self.invoke_view_request_from_cli(req, want_binary=True)
+
+                if not data:
+                    print("⚠️  No export data received")
+                    return EXIT_OUTPUT
+
+                out_path = parsed.out_path
+                if out_path:
+                    out_path.parent.mkdir(parents=True, exist_ok=True)
+                    out_path.write_bytes(data)
+                    print(f"💾 CSV saved to {out_path}")
+                else:
+                    import tempfile
+                    from pathlib import Path
+                    tmp = Path(tempfile.mkdtemp(prefix="argo_")) / "export.csv"
+                    tmp.write_bytes(data)
+                    print(f"💾 CSV saved to {tmp}")
                 return EXIT_SUCCESS
+
         except PluginMessageError as exc:
             handle_cli_plugin_error(exc.payload)
             return exit_code_for_error(exc.payload.get("code"))
