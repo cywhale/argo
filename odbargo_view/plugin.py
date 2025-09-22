@@ -1663,7 +1663,11 @@ def _compute_plot_bytes(plugin: OdbArgoViewPlugin, message: Dict[str, Any]) -> b
     finally:
         plt.close(fig)
 
-    plugin._debug(f"plot ready: size={len(png_bytes)} bytes", msg_id)
+    sig = png_bytes[:8]
+    if sig != b"\x89PNG\r\n\x1a\n":
+        plugin._debug(f"png signature mismatch: {sig!r}", msg_id)
+    else:
+        plugin._debug(f"png size={len(png_bytes)} head={sig!r}", msg_id)
     return png_bytes
 
 def _compute_export_bytes(plugin: OdbArgoViewPlugin, message: Dict[str, Any]) -> Tuple[str, bytes, str]:

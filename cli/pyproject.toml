@@ -1,0 +1,22 @@
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[project]
+name = "odbargo-cli"
+version = "0.2.5"
+description = "ODBArgo downloader + WS bridge CLI"
+requires-python = ">=3.10"
+dependencies = [
+  "websockets>=12.0",
+  "readline; platform_system != 'Windows'",
+]
+
+[project.optional-dependencies]
+view = ["odbargo-view>=0.2.5"]
+
+[project.scripts]
+odbargo-cli = "cli.odbargo_cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["odbargo-cli"]

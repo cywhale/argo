@@ -60,3 +60,6 @@
         -- plot/export binary relay hardened; CSV streaming via `file_start` → binary chunks → `file_end` with SHA-256
         -- add env `ODBARGO_DEBUG=1` to enable CLI⇄plugin debug breadcrumbs (suppressed by default)
         -- README_odbargo-view.md refreshed with new options and examples
+#### ver 0.2.5 Breaking completely deprecate old FastAPI structure and CLI packages        
+        -- ensure_viewer(), and self‑registration stabilized; robust binary forwarding
+        -- one-file pyinstaller packaging (.spec) and pip install (.toml)

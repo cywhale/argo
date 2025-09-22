@@ -1,0 +1,23 @@
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[project]
+name = "odbargo-view"
+version = "0.2.5"
+description = "Viewer/analytics for ODBArgo (xarray/matplotlib)"
+requires-python = ">=3.10"
+dependencies = [
+  "xarray>=2024.6.0",
+  "h5netcdf",
+  "h5py",
+  "matplotlib>=3.8",
+  "numpy>=1.26",
+  "pandas>=2.1",
+]
+
+[project.scripts]
+odbargo-view = "odbargo_view.plugin:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["odbargo_view"]

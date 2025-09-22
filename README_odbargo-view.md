@@ -1,154 +1,162 @@
-# ODBArgo View Plugin — README
+# README\_odbargo-view
 
-A lightweight **viewer/analytics companion** for `odbargo-cli`. It keeps heavy deps (xarray/pandas/matplotlib/h5netcdf/h5py) out of the main CLI and speaks the same single‑port WebSocket contract via the CLI bridge. You can also run everything offline from the CLI REPL using `/view ...` slash commands.
+## Introduction
+
+`odbargo_view` is an **optional viewer module** for `odbargo-cli` that lets you **open, preview, filter, plot, and export** Argo NetCDF data directly from the CLI using `/view ...` commands.
+
+* **Why optional?** We keep the main CLI tiny. The viewer carries heavy scientific deps (xarray/h5py/matplotlib), so it’s installed only when you need it.
+* **No viewer executable shipped.** Install from the source archive; the CLI will auto‑start it in *module mode*.
 
 ---
 
 ## Install
 
-```bash
-# recommended: venv
-python -m venv .venv && source .venv/bin/activate    # Windows: .venv\Scripts\activate
+We ship a source archive that includes the viewer package:
 
-# install the view module with optional pandas
-pip install -e .[view]
+```bash
+pip install dist/odbargo-0.2.5.tar.gz
 ```
 
-> PyInstaller users: build **two** one‑file binaries and ship together: the lean `odbargo-cli` and the heavy `odbargo-view`.
+Now, when you run `odbargo-cli` and type a `/view ...` command, the viewer starts automatically (`python -m odbargo_view`).
 
----
+> If you built your own `odbargo-view` executable and placed it next to `odbargo-cli`, the CLI will prefer that binary.
 
-## Run
+**Auto‑detection order when you use `/view ...`:**
 
-### A) With the main CLI (preferred)
+1. Adjacent `odbargo-view` binary (if present) → use it
+2. Otherwise, launch `python -m odbargo_view`
+
+You can tune the first‑run import window via:
 
 ```bash
-# start the CLI server + REPL
-python odbargo-cli.py --port 8765   # default 8765
-
-# (optional) force/point to the viewer binary
-# python odbargo-cli.py --plugin view --plugin-binary ./dist/odbargo-view
+export ODBARGO_VIEW_STARTUP_TIMEOUT=8.0  # seconds
 ```
 
-The CLI will spawn/bridge the viewer on demand the first time you issue a `/view ...` command. The same WS port is used for platform apps (e.g., APIverse) and the local REPL.
-
-### B) Standalone smoke test
+Enable verbose debugging:
 
 ```bash
-# developer mode — run the plugin by itself (stdin/stdout NDJSON)
-python -m odbargo_view
+export ODBARGO_DEBUG=1
 ```
 
 ---
 
-## Quickstart (Slash in CLI REPL)
+## Quick Start
 
-```text
-argo> /view open /tmp/argo_data.nc as ds1
+```bash
+odbargo-cli
+argo> /view open /path/to/argo_data.nc as ds1
 argo> /view list_vars ds1
-argo> /view preview ds1 --cols TIME,PRES,TEMP \
-       --filter "PRES BETWEEN 25 AND 100" --order TIME:asc --limit 500
-argo> /view plot ds1 timeseries --x TIME --y TEMP --out temp_ts.png
-argo> /view export ds1 csv --cols TIME,LATITUDE,LONGITUDE,PRES,TEMP --out ds1_subset.csv
+argo> /view preview ds1 --cols TIME,PRES,TEMP --limit 100
+argo> /view plot ds1 timeseries --x TIME --y TEMP --out temp.png
 ```
+
+* `open` registers a dataset alias (e.g., `ds1`).
+* `list_vars` prints coordinates and data variables.
+* `preview` shows a bounded table (respects `--limit`, `--order`, filters).
+* `plot` streams back a PNG; add `--out` to save, or omit to open with your system viewer.
 
 ---
 
 ## Commands
 
-### `open`
+All viewer features are available through slash commands in `odbargo-cli`.
 
-```
+### Open
+
+```bash
 /view open <path> [as <datasetKey>]
 ```
 
-* Engines: prefers **h5netcdf**, falls back to netcdf4/default.
+* Supports NetCDF via `h5netcdf` (preferred) or `netcdf4` (fallback).
 
-### `list_vars`
+### List variables
 
-```
+```bash
 /view list_vars [<datasetKey>]
 ```
 
-* Prints coordinates and variables with dtypes/shapes.
+### Preview
 
-### `preview`
-
-```
-/view preview <datasetKey> [--cols A,B,...] [--filter <DSL>] [--json-filter <JSON>]
-                    [--bbox x0,y0,x1,y1 | --box ...] [--start YYYY-MM-DD] [--end YYYY-MM-DD]
-                    [--order COL[:asc|desc]] [--cursor N] [--limit N]
-                    [--trim-dims]
-                    [as <subsetKey>]
-```
-
-**Notes**
-
-* Keeps coordinate/dimension columns by default when you narrow `--cols`; use `--trim-dims` to drop them.
-* Pagination with `--cursor` preserves the **last displayed** columns unless you pass new `--cols`.
-* `--bbox/--start/--end` layer on top of `--filter` and are persisted when saving `as <subsetKey>`.
-
-### `plot`
-
-```
-/view plot <datasetKey> <timeseries|profile|map>
-           [--x COL] [--y COL]
-           [--group-by COL[,COL2...]] [--agg mean|median|max|min|count]
-           [--filter <DSL>] [--order COL[:asc|desc]] [--limit N]
-           [--size W×H] [--dpi N] [--title "..."] [--grid] [--invert-y]
-           [--cmap NAME]  # map/color helpers
-           [--out <png>]
+```bash
+/view preview <datasetKey> \
+  [--cols TIME,PRES,TEMP] \
+  [--filter "PRES BETWEEN 25 AND 100 AND TEMP > 0"] \
+  [--order TIME:asc] [--cursor c1] [--limit 1000] \
+  [--start 2010-01-01] [--end 2012-12-31] [--bbox lon1,lat1,lon2,lat2] \
+  [--trim-dims]
 ```
 
-**Grouping & aggregation**
+* Shows a bounded table (the plugin enforces upper caps).
+* **Filters** can combine: value conditions, time window (`--start/--end`), spatial box (`--bbox`).
+* `--trim-dims` removes dimension coords from the output (default: keep TIME/LATITUDE/LONGITUDE).
 
-* `--group-by WMO` → one series per WMO.
-* `--group-by PRES:10.0` → numeric binning (10‑dbar bins) then one series per bin.
-* `--group-by TIME:1D` → resample along time (single series). Combine with others for multi‑series (e.g., `WMO,TIME:1D`).
-* `--agg` applies the reducer per series (`mean` default).
+### Plot
 
-**Display**
-
-* Without `--out`, the CLI shows a non‑blocking local window **if** matplotlib is available; otherwise it saves to a temp file and opens with the OS default viewer.
-
-### `export`
-
-```
-/view export <datasetKey> csv [--cols A,B,...] [--filter <DSL>]
-                             [--order COL[:asc|desc]] [--limit N]
-                             [--out <csv>]
+```bash
+/view plot <datasetKey> <timeseries|profile|map> \
+  --x <XCOL> --y <YCOL> \
+  [--group-by COL[:BIN],COL2[:BIN]] [--agg mean|median|count] \
+  [--filter …] [--order …] [--limit N] \
+  [--cmap viridis] [--size 900x500] [--dpi 120] [--title "..."] \
+  [--out plot.png]
 ```
 
-* Streams CSV over the same WS as **binary**; the CLI writes chunks to `--out`.
+* **timeseries**: usually `--x TIME --y <var>`; supports grouping/aggregation.
+* **profile**: usually `--x <var> --y PRES` (Y is inverted by default).
+* **map**: `--x LONGITUDE --y LATITUDE` (optional color by `--y <var>` or use `--cmap`).
+* `--group-by` accepts `COL` or `COL:BIN` (e.g., `PRES:10.0`, `TIME:1D`). Use with `--agg` to plot grouped series with legends.
 
-### `close`
+### Export
 
+```bash
+/view export <datasetKey> csv \
+  [--cols TIME,LATITUDE,LONGITUDE,PRES,TEMP,DOXY] \
+  [--filter …] [--order …] [--limit N] \
+  --out data.csv
 ```
-/view close <datasetKey>
+
+* Streams CSV in chunks; the CLI aggregates and writes to `--out`.
+
+---
+
+## Filtering (quick guide)
+
+* DSL supports: `= != > >= < <=`, `BETWEEN a AND b`, `AND`, `OR`, parentheses.
+* Time literals use ISO‑8601 strings, e.g., `TIME >= "2019-01-01"`.
+* You can also pass a JSON filter with `--json-filter '{"and":[...]}'` (advanced).
+
+Examples:
+
+```bash
+--filter "PRES BETWEEN 25 AND 100 AND DOXY > 0"
+--start 2010-01-01 --end 2011-01-01 --bbox 120,20,130,26
 ```
 
 ---
 
-## Common Options
+## Tips
 
-* **Filtering**: `--filter` (DSL), `--json-filter` (structured), `--bbox/--box`, `--start/--end`.
-* **Projection**: `--cols` (keeps coords unless `--trim-dims`).
-* **Paging/Order**: `--limit`, `--cursor`, `--order COL[:asc|desc]`.
-* **Grouping** (plot): `--group-by`, `--agg`.
-* **Output**: `--out <file>` (PNG/CSV); omit to preview.
+* Omit `--out` on `/view plot …` to let the CLI open the PNG via your system viewer; add `--out` to save instead.
+* `--limit` works for **preview/export/plot** to keep responses small when piping results to a frontend.
+* On first plot the imports may be slow; that’s normal. Adjust `ODBARGO_VIEW_STARTUP_TIMEOUT` if needed.
 
 ---
 
-## Environment
+## Build (advanced users)
 
-* `ODBARGO_VIEW_BINARY` — path to the viewer binary for the CLI to spawn (otherwise autodetect adjacent binary/module).
-* `ODBARGO_PLUGIN_TOKEN` — optional shared secret for viewer self‑registering over the CLI’s WS.
-* `ODBARGO_DEBUG=1` — enable verbose bridge diagnostics (plugin ⇄ CLI). When off/absent, debug frames are skipped.
+* Clone the repo and use the PyInstaller spec if you want a local viewer executable:
+
+  * `pyinstaller/odbargo-view.spec` (Agg‑only; curated `mpl-data`).
+* We do not publish the viewer binary by default due to size; the sdist install is the recommended path.
 
 ---
 
-## Notes
+## Troubleshooting
 
-* Heavy deps live **only** in this module; the main `odbargo-cli` stays small.
-* One WS port for everything. Images/CSV stream as WS **binary** frames; no base64.
-* Safe, closed‑world filter DSL; coordinates allowed even when a subset projection narrows variables.
+* **Viewer didn’t start?** Ensure you installed the sdist and try again; or set `ODBARGO_DEBUG=1` to see handshake logs.
+* **PNG didn’t open?** Add `--out plot.png` and open it manually; the CLI always writes the raw bytes.
+* **Slow on first use?** Heavy libs are imported the first time; later commands are faster.
+
+---
+
+*For downloader usage and platform integration (Ocean APIverse), see the main* **README.md**.

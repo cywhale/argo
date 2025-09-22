@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "odbargo"
+version = "0.2.5"
+description = "ODBArgo CLI + viewer (single distribution)"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "websockets>=12.0",
+]
+# Optional heavy deps (used by the viewer)
+[project.optional-dependencies]
+view = [
+  "xarray>=2024.6.0",
+  "h5netcdf",
+  "h5py",
+  "matplotlib>=3.8",
+  "numpy>=1.26",
+  "pandas>=2.1",
+]
+
+[project.scripts]
+odbargo-cli  = "cli.odbargo_cli:main"
+odbargo-view = "odbargo_view.plugin:main"
+
+[tool.setuptools]
+# Explicitly list the only packages to include
+packages = ["cli", "odbargo_view"]
+
+# If you plan to include additional subpackages under these, use pattern find:
+# [tool.setuptools.packages.find]
+# include = ["cli*", "odbargo_view*"]
+# exclude = ["dev*", "tmp*", "ref*", "figs*", "conf*", "specs*", "argo_app*", "tests*", "scripts*"]

@@ -19,6 +19,7 @@ import tempfile
 import time
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Dict, Iterable, List, Optional, Set
+import shutil, subprocess, importlib.util
 
 try:  # Optional readline support for interactive editing
     import readline  # type: ignore
@@ -139,6 +140,96 @@ async def plugin_ws_send_binary(data: bytes) -> None:
         raise RuntimeError("Plugin WS not available")
     await _plugin_ws.send(data)
 
+def _adjacent_view_binary() -> str | None:
+    """Return path to an adjacent odbargo-view binary, searching script dir, parent, dist, and PATH."""
+    # script dir where the entry was invoked
+    here = os.path.dirname(os.path.abspath(sys.argv[0]))
+    parent = os.path.abspath(os.path.join(here, ".."))
+    exe = "odbargo-view" + (".exe" if os.name == "nt" else "")
+    candidates = [
+        os.path.join(here, exe),
+        os.path.join(here, "dist", exe),
+        os.path.join(parent, exe),
+        os.path.join(parent, "dist", exe),
+    ]
+    for p in candidates:
+        if os.path.isfile(p) and os.access(p, os.X_OK):
+            return p
+    return shutil.which("odbargo-view")
+
+async def ensure_viewer(self) -> bool:
+    """
+    Try to ensure the viewer is running and has registered via WS.
+    Returns True if available (already or after spawn), else False.
+    """
+    # already registered?
+    if getattr(self, "plugin_ws_available", None) and self.plugin_ws_available():
+        return True
+
+    # respect --plugin none
+    if getattr(self, "plugin_mode", "auto") == "none":
+        if ODBARGO_DEBUG:
+            print("[View] ensure_viewer: disabled by --plugin none")
+        return False
+
+    # avoid spawning multiple times
+    if getattr(self, "_viewer_spawn_inflight", False):
+        # just wait for registration below
+        pass
+    else:
+        self._viewer_spawn_inflight = True
+
+        # prefer explicit --plugin-binary, else adjacent, else python -m
+        bin_path = getattr(self, "plugin_binary", None) or _adjacent_view_binary()
+
+        # figure out WS URL from attrs (port may be named ws_port or port)
+        ws_port = getattr(self, "ws_port", None) or getattr(self, "port", None)
+        ws_url = f"ws://127.0.0.1:{ws_port}"
+        env = dict(os.environ)
+        env["ODBARGO_CLI_WS"] = ws_url
+        token = os.environ.get("ODBARGO_PLUGIN_TOKEN", "")
+        if token:
+            env["ODBARGO_PLUGIN_TOKEN"] = token
+
+        try:
+            if bin_path:
+                if ODBARGO_DEBUG:
+                    print(f"[View] ensure_viewer: spawning binary {bin_path} with ODBARGO_CLI_WS={ws_url}")
+                subprocess.Popen([bin_path], env=env,
+                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            else:
+                if importlib.util.find_spec("odbargo_view") is None:
+                    if ODBARGO_DEBUG:
+                        print("[View] ensure_viewer: odbargo_view module not found")
+                    self._viewer_spawn_inflight = False
+                    return False
+                if ODBARGO_DEBUG:
+                    print(f"[View] ensure_viewer: launching module 'python -m odbargo_view' with ODBARGO_CLI_WS={ws_url}")
+                subprocess.Popen([sys.executable, "-m", "odbargo_view"], env=env,
+                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except Exception as exc:
+            if ODBARGO_DEBUG:
+                print(f"[View] ensure_viewer: spawn failed: {exc}")
+            self._viewer_spawn_inflight = False
+            return False
+
+    # wait for registration (heavy deps can take time on first import)
+    # allow override via env, default ~8s
+    timeout_s = float(os.environ.get("ODBARGO_VIEW_STARTUP_TIMEOUT", "8.0"))
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline:
+        if self.plugin_ws_available():
+            self._viewer_spawn_inflight = False
+            if ODBARGO_DEBUG:
+                print("[View] ensure_viewer: plugin registered")
+            return True
+        await asyncio.sleep(0.1)
+
+    self._viewer_spawn_inflight = False
+    if ODBARGO_DEBUG:
+        print("[View] ensure_viewer: timeout waiting for plugin registration")
+    return False
+
 class PluginMessageError(Exception):
     def __init__(self, payload: Dict[str, Any]):
         super().__init__(payload.get("message", "Plugin error"))
@@ -160,7 +251,7 @@ class PluginClient:
         self._msg_counter = 0
         self._launch_cmd: Optional[List[str]] = None
         self._startup_error: Optional[str] = None
-
+  
     async def ensure_started(self) -> None:
         if self.mode == "none":
             raise PluginUnavailableError("View plugin disabled (--plugin none)")
@@ -171,8 +262,13 @@ class PluginClient:
         if self._launch_cmd is None:
             self._launch_cmd = self._resolve_launch_command()
         if not self._launch_cmd:
-            self._startup_error = "View plugin not available; run odbargo-view separately or pass --plugin view/--plugin-binary"
-            raise PluginUnavailableError(self._startup_error)
+            # If the plugin WS isn’t up, try to launch/register it now
+            if not plugin_ws_available():
+                ok = await ensure_viewer(self)
+                if not ok:
+                    self._startup_error = "View plugin not available; run odbargo-view separately or pass --plugin view/--plugin-binary"
+                    print(f"ℹ️ {self._startup_error}")
+                    raise PluginUnavailableError(self._startup_error)
         try:
             self._process = await asyncio.create_subprocess_exec(
                 *self._launch_cmd,
@@ -489,6 +585,10 @@ class ArgoCLIApp:
         except Exception:
             return False
     
+    def plugin_ws_available(self) -> bool:
+        """Return True if the WS-registered viewer is connected."""
+        return self._ws_is_open(self._plugin_ws)
+
     def _maybe_reprompt(self) -> None:
         # Repaint the REPL prompt immediately (no newline) if we’re in interactive mode.
         try:
@@ -554,6 +654,7 @@ class ArgoCLIApp:
                             self._plugin_caps = {}
                             self._plugin_pending.clear()
                             print("[View] WS-plugin disconnected; cleared state")
+                            self._maybe_reprompt()
                     return  # end handler for this connection
 
                 # normal client message
@@ -603,9 +704,19 @@ class ArgoCLIApp:
             await self._handle_download_request(websocket, data)
             return
         if msg_type and msg_type.startswith("view."):
+            if not self.plugin_ws_available():
+                ok = await ensure_viewer(self)
+                if not ok:
+                    await websocket.send(json.dumps({
+                        "type": "error",
+                        "requestId": data.get("requestId"),
+                        "code": "PLUGIN_NOT_AVAILABLE",
+                        "message": "View plugin not available; install or provide --plugin-binary",
+                    }))
+                    return
             await self._handle_view_request(websocket, data)
             return
-             
+        
         await websocket.send(json.dumps({"type": "error", "code": "UNKNOWN_MSG", "message": f"Unsupported type {msg_type}"}))
 
     async def _plugin_reader(self, websocket: websockets.WebSocketServerProtocol) -> None:
@@ -635,7 +746,7 @@ class ArgoCLIApp:
                             self._plugin_pending.pop(msg_id, None)
 
                         # optional debug breadcrumb
-                        print(f"[View] → forwarded binary ({'plot' if msg_id else 'unknown'})")
+                        # print(f"[View] → forwarded binary ({'plot' if msg_id else 'unknown'})")
                     else:
                         print("[View] plugin sent binary but no pending request expects it")
                     continue
@@ -714,6 +825,7 @@ class ArgoCLIApp:
                     }))
                     self._plugin_pending.pop(msg_id, None)
                     print("[View] ← dataset_closed routed")
+                    self._maybe_reprompt()
 
                 elif op == "plot_blob":
                     # header first; the PNG bytes will arrive next as a binary WS frame
@@ -726,6 +838,7 @@ class ArgoCLIApp:
                         "size": msg.get("size"),
                     }))
                     print("[View] ← plot_blob header routed; awaiting binary.")
+                    self._maybe_reprompt()
 
                 elif op == "file_start":
                     # CSV export starts – mark this waiter as expecting binary chunks
@@ -752,6 +865,7 @@ class ArgoCLIApp:
                     }))
                     self._plugin_pending.pop(msg_id, None)
                     print("[View] ← file_end routed")
+                    self._maybe_reprompt()
 
                 elif op == "error":
                     await client_ws.send(json.dumps({
@@ -764,6 +878,7 @@ class ArgoCLIApp:
                     }))
                     self._plugin_pending.pop(msg_id, None)
                     print("[View] ← error routed:", msg.get("code"))
+                    self._maybe_reprompt()
 
         except websockets.ConnectionClosed:  # plugin went away
             pass
@@ -1063,6 +1178,16 @@ class ArgoCLIApp:
             payload["type"] = parsed.request_type
             print(json.dumps(payload, indent=2))
         try:
+            # If the plugin WS isn’t up, try to launch/register it now
+            is_view = parsed.request_type.startswith("view.")
+            is_help = parsed.request_type in ("view.help", "view.usage") or command.strip().lower() in ("/view help", "/view --help")
+            if is_view and not is_help:
+                if not self.plugin_ws_available():
+                    ok = await ensure_viewer(self)
+                    if not ok:
+                        print("⚠️ View plugin not available; run odbargo-view separately or pass --plugin view/--plugin-binary")
+                        return EXIT_PLUGIN
+                            
             if parsed.request_type == "view.open_dataset":
                 req = dict(parsed.request_payload)
                 req["type"] = "view.open_dataset"

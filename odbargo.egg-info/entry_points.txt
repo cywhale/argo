@@ -1,0 +1,3 @@
+[console_scripts]
+odbargo-cli = cli.odbargo_cli:main
+odbargo-view = odbargo_view.plugin:main
