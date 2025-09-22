@@ -1797,7 +1797,7 @@ async def run_ws_mode(ws_url: str, token: str) -> None:
 
 def main() -> None:
     ws_url = os.environ.get("ODBARGO_CLI_WS", "ws://127.0.0.1:8765").strip()  # e.g. ws://127.0.0.1:8765
-    token  = os.environ.get("ODBARGO_PLUGIN_TOKEN", "odbargoplot").strip()
+    token  = os.environ.get("ODBARGO_PLUGIN_TOKEN", "").strip()
 
     if ws_url:
         # --- WS transport mode (self-register to CLI) ---

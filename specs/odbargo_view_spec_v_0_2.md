@@ -646,3 +646,14 @@ class Bridge:
 
 ---
 
+## 18. Environment variables
+
+Short knobs you can set before launching `odbargo-cli` or the viewer:
+
+* `ODBARGO_VIEW_STARTUP_TIMEOUT` — *float seconds*, default \~`8.0`. How long the CLI waits for the viewer to self‑register on first cold start.
+* `ODBARGO_DEBUG` — set to `1` to enable verbose debug logs in CLI and viewer (WS handshake, routing, sizes, etc.).
+* `ODBARGO_PLUGIN_TOKEN` — optional shared secret used by the viewer when registering over WebSocket; if set, the CLI will only accept registrations that present the same token.
+* `ODBARGO_CLI_WS` — the WebSocket URL of a running CLI (e.g., `ws://127.0.0.1:8765`). Needed only when you **start the viewer manually** so it can self‑register.
+
+---
+

@@ -54,7 +54,7 @@ exe = EXE(
     runtime_tmpdir=None,
     console=True,
     onefile=True,
-    version='version-viewer.txt',
+    version='version.txt',
     icon=['icon.ico']
 )
 

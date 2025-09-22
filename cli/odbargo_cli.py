@@ -104,7 +104,7 @@ def download_argo_data(wmo_list: List[int], output_path: str, insecure: bool = F
 # ---------------------------------------------------------------------------
 
 # --- Plugin peer (WS) registration state ---
-PLUGIN_AUTH_TOKEN = os.environ.get("ODBARGO_PLUGIN_TOKEN", "odbargoplot")  # optional shared secret
+# PLUGIN_AUTH_TOKEN = os.environ.get("ODBARGO_PLUGIN_TOKEN", "")  # optional shared secret
 _plugin_ws: Optional[websockets.WebSocketServerProtocol] = None
 
 def _ws_is_open(conn) -> bool:

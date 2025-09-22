@@ -1,8 +1,8 @@
-# README\_odbargo-view
+# Install and Use odbargo-view
 
 ## Introduction
 
-`odbargo_view` is an **optional viewer module** for `odbargo-cli` that lets you **open, preview, filter, plot, and export** Argo NetCDF data directly from the CLI using `/view ...` commands.
+`odbargo-view` is an **optional viewer module** for `odbargo-cli` that lets you **open, preview, filter, plot, and export** Argo NetCDF data directly from the CLI using `/view ...` commands.
 
 * **Why optional?** We keep the main CLI tiny. The viewer carries heavy scientific deps (xarray/h5py/matplotlib), so it’s installed only when you need it.
 * **No viewer executable shipped.** Install from the source archive; the CLI will auto‑start it in *module mode*.
@@ -11,32 +11,15 @@
 
 ## Install
 
-We ship a source archive that includes the viewer package:
+We ship a source archive that includes the viewer package, as mentioned in [README: odbargo-cli](https://github.com/cywhale/argo/blob/main/README.md):
 
 ```bash
-pip install dist/odbargo-0.2.5.tar.gz
+pip install odbargo-0.x.y.tar.gz
 ```
 
-Now, when you run `odbargo-cli` and type a `/view ...` command, the viewer starts automatically (`python -m odbargo_view`).
+Now, when you run `odbargo-cli` and type a `/view ...` command, the viewer starts automatically.
 
-> If you built your own `odbargo-view` executable and placed it next to `odbargo-cli`, the CLI will prefer that binary.
-
-**Auto‑detection order when you use `/view ...`:**
-
-1. Adjacent `odbargo-view` binary (if present) → use it
-2. Otherwise, launch `python -m odbargo_view`
-
-You can tune the first‑run import window via:
-
-```bash
-export ODBARGO_VIEW_STARTUP_TIMEOUT=8.0  # seconds
-```
-
-Enable verbose debugging:
-
-```bash
-export ODBARGO_DEBUG=1
-```
+> If you built your own `odbargo-view` executable, you can just run it when `odbargo-cli` is running, or placed it next to `odbargo-cli`, the CLI will prefer that binary and automatically find it.
 
 ---
 
@@ -46,13 +29,13 @@ export ODBARGO_DEBUG=1
 odbargo-cli
 argo> /view open /path/to/argo_data.nc as ds1
 argo> /view list_vars ds1
-argo> /view preview ds1 --cols TIME,PRES,TEMP --limit 100
+argo> /view preview ds1 as ds2 --cols TIME,PRES,TEMP --order TIME:desc --limit 1000
 argo> /view plot ds1 timeseries --x TIME --y TEMP --out temp.png
 ```
 
 * `open` registers a dataset alias (e.g., `ds1`).
 * `list_vars` prints coordinates and data variables.
-* `preview` shows a bounded table (respects `--limit`, `--order`, filters).
+* `preview` shows a bounded table (respects `--limit`, `--order`, filters). 
 * `plot` streams back a PNG; add `--out` to save, or omit to open with your system viewer.
 
 ---
@@ -138,7 +121,7 @@ Examples:
 
 * Omit `--out` on `/view plot …` to let the CLI open the PNG via your system viewer; add `--out` to save instead.
 * `--limit` works for **preview/export/plot** to keep responses small when piping results to a frontend.
-* On first plot the imports may be slow; that’s normal. Adjust `ODBARGO_VIEW_STARTUP_TIMEOUT` if needed.
+* You can furthur save preview result as a dataframe by `preview ds1 as ds2` (ds1 or ds2 are examples for dataset-alias). If you need to overwrite a dataset alias, you should /view close dataset-alias first.
 
 ---
 
@@ -155,8 +138,8 @@ Examples:
 
 * **Viewer didn’t start?** Ensure you installed the sdist and try again; or set `ODBARGO_DEBUG=1` to see handshake logs.
 * **PNG didn’t open?** Add `--out plot.png` and open it manually; the CLI always writes the raw bytes.
-* **Slow on first use?** Heavy libs are imported the first time; later commands are faster.
+* **Slow on first use?** Heavy libs are imported the first time; later commands are faster. On first plot the imports may be slow; that’s normal. Adjust `ODBARGO_VIEW_STARTUP_TIMEOUT` if needed.
 
 ---
 
-*For downloader usage and platform integration (Ocean APIverse), see the main* **README.md**.
+*For downloader usage and platform integration (Ocean APIverse), see the main* [README: odbargo-cli](https://github.com/cywhale/argo/blob/main/README.md).

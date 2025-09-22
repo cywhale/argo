@@ -62,4 +62,4 @@
         -- README_odbargo-view.md refreshed with new options and examples
 #### ver 0.2.5 Breaking completely deprecate old FastAPI structure and CLI packages        
         -- ensure_viewer(), and self‑registration stabilized; robust binary forwarding
-        -- one-file pyinstaller packaging (.spec) and pip install (.toml)
+        -- one-file pyinstaller packaging (.spec) and pip install (.toml), renew linux_cli and win_cli executive
