@@ -63,3 +63,6 @@
 #### ver 0.2.5 Breaking completely deprecate old FastAPI structure and CLI packages        
         -- ensure_viewer(), and self‑registration stabilized; robust binary forwarding
         -- one-file pyinstaller packaging (.spec) and pip install (.toml), renew linux_cli and win_cli executive
+#### ver 0.2.6 Fix plugin.view command throught websocket and improve plot functions
+        -- align map plotting across WS/stdio so `--bins`/`agg` actually trigger gridded `pcolormesh` (robust binning; scatter fallback remains with larger markers and debug breadcrumbs)
+

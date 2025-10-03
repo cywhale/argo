@@ -71,7 +71,7 @@ def test_build_map_grid_with_regular_coords():
         },
     )
     df = _build_dataframe(ds)
-    grid = plugin._build_map_grid(df, "LONGITUDE", "LATITUDE", "DOXY")
+    grid = plugin._build_map_grid(df, "LONGITUDE", "LATITUDE", "DOXY", {"lon": 20.0, "lat": 10.0})
     assert grid is not None
     lon_grid, lat_grid, values = grid
     assert lon_grid.shape == (2, 2)

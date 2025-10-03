@@ -1,8 +1,20 @@
 import asyncio
 import importlib.util
+import sys
 from pathlib import Path
 
 import pytest
+
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+try:
+    import cli as _cli_package
+    sys.modules.setdefault("argo_cli", _cli_package)
+except ImportError:
+    pass
 
 
 _SPEC = importlib.util.spec_from_file_location(

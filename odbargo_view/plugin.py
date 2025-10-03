@@ -892,12 +892,44 @@ class OdbArgoViewPlugin:
         lon_col: str,
         lat_col: str,
         value_col: Optional[str],
+        bins: Optional[Dict[str, Any]] = None,
+        agg: Optional[str] = None,
     ) -> Optional[Tuple[np.ndarray, np.ndarray, np.ndarray]]:
-        if not value_col or value_col not in df.columns:
+        if not value_col or value_col not in df.columns or not isinstance(bins, dict):
             return None
-        pivot = df.pivot_table(index=lat_col, columns=lon_col, values=value_col, aggfunc="mean")
+
+        try:
+            lon_step = float(bins.get("lon", 0.0))
+            lat_step = float(bins.get("lat", 0.0))
+        except Exception:
+            return None
+        if lon_step <= 0.0 or lat_step <= 0.0:
+            return None
+
+        b = df[[lon_col, lat_col, value_col]].dropna()
+        if b.empty:
+            return None
+
+        import numpy as _np
+        # floor-binning is stable for negative longitudes/latitudes
+        b["__lon_bin__"] = (_np.floor(b[lon_col].to_numpy(dtype=float) / lon_step) * lon_step)
+        b["__lat_bin__"] = (_np.floor(b[lat_col].to_numpy(dtype=float) / lat_step) * lat_step)
+
+        agg_value = str(agg or bins.get("agg", "mean")).lower()
+        if   agg_value in {"mean", "avg"}: reducer = "mean"
+        elif agg_value in {"median", "med"}: reducer = "median"
+        elif agg_value in {"min", "max", "sum", "count"}: reducer = agg_value
+        else: reducer = "mean"
+
+        pivot = b.pivot_table(
+            index="__lat_bin__",   # Y
+            columns="__lon_bin__", # X
+            values=value_col,
+            aggfunc=reducer,
+        )
         if pivot.empty or pivot.shape[0] < 2 or pivot.shape[1] < 2:
             return None
+
         pivot = pivot.sort_index().sort_index(axis=1)
         try:
             lon_vals = pd.to_numeric(pivot.columns)
@@ -907,7 +939,8 @@ class OdbArgoViewPlugin:
             lat_vals = pd.to_numeric(pivot.index)
         except Exception:
             lat_vals = pivot.index.to_numpy()
-        lon_grid, lat_grid = np.meshgrid(lon_vals, lat_vals)
+
+        lon_grid, lat_grid = _np.meshgrid(lon_vals, lat_vals)
         return lon_grid, lat_grid, pivot.to_numpy()
 
     def _extract_fields_from_json(self, node: Dict[str, Any]) -> List[str]:
@@ -1108,6 +1141,13 @@ class OdbArgoViewPlugin:
             raise PluginError("INTERNAL_ERROR", f"Preview failed: {type(e).__name__}: {e}")
 
     def _handle_plot(self, msg_id: str, message: Dict[str, Any]) -> None:
+        params = message.get("params")
+        if isinstance(params, dict):
+            merged: Dict[str, Any] = dict(params)
+            for key in ("datasetKey", "kind", "style", "filter", "bins", "agg", "x", "y", "z", "limit", "orderBy"):
+                if key not in merged and key in message:
+                    merged[key] = message[key]
+            message = merged
         dataset_key = message.get("datasetKey")
         kind = message.get("kind")
         x_col = message.get("x")
@@ -1310,27 +1350,67 @@ class OdbArgoViewPlugin:
                     ax.invert_yaxis()
 
             elif kind == "map":
+                # Resolve axes/colour column
                 lon_col, lat_col, value_col = self._resolve_map_columns(df, message, None)
                 if lon_col not in df.columns or lat_col not in df.columns:
                     raise PluginError("PLOT_FAIL", "map plot requires longitude and latitude columns")
+
                 cmap = style.get("cmap", "viridis")
-                grid = self._build_map_grid(df, lon_col, lat_col, value_col)
-                if grid is not None:
+
+                # Accept bins/agg from message or style (same as WS helper)
+                bins_param = message.get("bins") or style.get("bins") or {}
+                agg_param  = message.get("agg")  or (bins_param.get("agg") if isinstance(bins_param, dict) else None)
+
+                # Breadcrumbs (visible when ODBARGO_DEBUG=1)
+                self._debug(
+                    f"map: rows={len(df)} z={value_col!r} bins={bins_param!r} agg={agg_param!r}",
+                    msg_id,
+                )
+
+                def _valid_bins(b):
+                    try:
+                        return (
+                            isinstance(b, dict)
+                            and float(b.get("lon", 0.0)) > 0.0
+                            and float(b.get("lat", 0.0)) > 0.0
+                        )
+                    except Exception:
+                        return False
+
+                use_grid = _valid_bins(bins_param) and bool(value_col)
+
+                # Try to build a regular 2D grid for pcolormesh
+                grid = self._build_map_grid(
+                    df, lon_col, lat_col, value_col, bins_param, agg_param
+                ) if use_grid else None
+
+                if use_grid and grid is not None:
                     lon_grid, lat_grid, value_grid = grid
+                    self._debug(f"map: gridded shape={value_grid.shape}", msg_id)
                     pcm = ax.pcolormesh(lon_grid, lat_grid, value_grid, shading="auto", cmap=cmap)
                     cbar = fig.colorbar(pcm, ax=ax)
                     if value_col:
                         cbar.set_label(value_col)
                 else:
+                    # Fallback to scatter if no/invalid bins or grid collapsed
+                    reason = "no/invalid bins" if not use_grid else "grid=None"
+                    self._debug(f"map: fallback scatter ({reason})", msg_id)
+
                     color_values = df[value_col] if value_col and value_col in df.columns else None
-                    sc = ax.scatter(df[lon_col], df[lat_col],
-                                    c=color_values,
-                                    cmap=cmap if color_values is not None else None,
-                                    s=style.get("size", 20),
-                                    alpha=style.get("alpha", 0.8))
+                    sc = ax.scatter(
+                        df[lon_col],
+                        df[lat_col],
+                        c=color_values,
+                        cmap=cmap if color_values is not None else None,
+                        s=float(style.get("pointSize") or message.get("pointSize") or 36),
+                        alpha=style.get("alpha", 0.75),
+                        edgecolors=style.get("edgecolor", "none"),
+                        marker=style.get("marker", "o"),
+                    )
                     if color_values is not None:
                         cbar = fig.colorbar(sc, ax=ax)
                         cbar.set_label(value_col)
+
                 ax.set_xlabel(lon_col)
                 ax.set_ylabel(lat_col)
                 if style.get("grid"):
@@ -1622,31 +1702,61 @@ def _compute_plot_bytes(plugin: OdbArgoViewPlugin, message: Dict[str, Any]) -> b
             lon_col, lat_col, value_col = plugin._resolve_map_columns(df, message, None)
             if lon_col not in df.columns or lat_col not in df.columns:
                 raise PluginError("PLOT_FAIL", "map plot requires longitude and latitude columns")
+
             cmap = style.get("cmap", "viridis")
-            grid = plugin._build_map_grid(df, lon_col, lat_col, value_col)
-            if grid is not None:
+
+            # NEW: accept bins/agg exactly like _handle_plot()
+            bins_param = message.get("bins") or style.get("bins") or {}
+            agg_param  = message.get("agg")  or (bins_param.get("agg") if isinstance(bins_param, dict) else None)
+
+            # breadcrumbs
+            plugin._debug(
+                f"map: rows={len(df)} z={value_col!r} bins={bins_param!r} agg={agg_param!r}",
+                msg_id,
+            )
+
+            def _valid_bins(b):
+                try:
+                    return (
+                        isinstance(b, dict)
+                        and float(b.get("lon", 0.0)) > 0.0
+                        and float(b.get("lat", 0.0)) > 0.0
+                    )
+                except Exception:
+                    return False
+
+            use_grid = _valid_bins(bins_param) and bool(value_col)
+            grid = plugin._build_map_grid(df, lon_col, lat_col, value_col, bins_param, agg_param) if use_grid else None
+
+            if use_grid and grid is not None:
                 lon_grid, lat_grid, value_grid = grid
+                plugin._debug(f"map: gridded shape={value_grid.shape}", msg_id)
                 pcm = ax.pcolormesh(lon_grid, lat_grid, value_grid, shading="auto", cmap=cmap)
                 cbar = fig.colorbar(pcm, ax=ax)
                 if value_col:
                     cbar.set_label(value_col)
             else:
+                reason = "no/invalid bins" if not use_grid else "grid=None"
+                plugin._debug(f"map: fallback scatter ({reason})", msg_id)
+
                 color_values = df[value_col] if value_col and value_col in df.columns else None
                 sc = ax.scatter(
                     df[lon_col], df[lat_col],
                     c=color_values,
                     cmap=cmap if color_values is not None else None,
-                    s=style.get("size", 20),
-                    alpha=style.get("alpha", 0.8),
+                    s=float(style.get("pointSize") or message.get("pointSize") or 36),
+                    alpha=style.get("alpha", 0.75),
+                    edgecolors=style.get("edgecolor", "none"),
+                    marker=style.get("marker", "o"),
                 )
                 if color_values is not None:
                     cbar = fig.colorbar(sc, ax=ax)
                     cbar.set_label(value_col)
+
             ax.set_xlabel(lon_col)
             ax.set_ylabel(lat_col)
             if style.get("grid"):
                 ax.set_aspect("equal", adjustable="datalim")
-
         else:
             raise PluginError("PLOT_FAIL", f"Unsupported plot kind '{kind}'")
 

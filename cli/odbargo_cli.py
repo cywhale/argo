@@ -1254,6 +1254,25 @@ class ArgoCLIApp:
                     if isinstance(gb, str):
                         gb = [s.strip() for s in gb.split(",") if s.strip()]
                     req["groupBy"] = gb
+                bins = parsed.request_payload.get("bins")
+                if isinstance(bins, str):
+                    # parse here too (CLI side), same rules as in slash parser
+                    bd = {}
+                    for it in bins.split(","):
+                        it = it.strip()
+                        if not it:
+                            continue
+                        if "=" not in it:
+                            raise ValueError(f"Bad --bins item '{it}', expected k=v")
+                        k, v = it.split("=", 1)
+                        k = k.strip().lower()
+                        if k not in ("lon", "lat"):
+                            raise ValueError(f"Unknown --bins key '{k}', use lon=... or lat=...")
+                        bd[k] = float(v)
+                    bins = bd
+                if isinstance(bins, dict):
+                    req["bins"] = bins                
+
                 if parsed.request_payload.get("agg"):
                     req["agg"] = parsed.request_payload["agg"]                 
                 if parsed.request_payload.get("limit") is not None:

@@ -91,14 +91,26 @@ def parse_size(value: str) -> Tuple[int, int]:
 
 
 def parse_bins(value: str) -> Dict[str, float]:
-    result: Dict[str, float] = {}
-    for pair in value.split(","):
-        if "=" not in pair:
+    #result: Dict[str, float] = {}
+    #for pair in value.split(","):
+    #    if "=" not in pair:
+    #        continue
+    #    key, val = pair.split("=", 1)
+    #    result[key.strip()] = float(val)
+    # e.g. "lon=0.25,lat=0.25"
+    out = {}
+    for part in value.split(","):
+        part = part.strip()
+        if not part:
             continue
-        key, val = pair.split("=", 1)
-        result[key.strip()] = float(val)
-    return result
-
+        if "=" not in part:
+            raise ValueError(f"Bad --bins item '{part}', expected k=v")
+        k, v = part.split("=", 1)
+        k = k.strip().lower()
+        if k not in ("lon", "lat"):
+            raise ValueError(f"Unknown --bins key '{k}', use lon=... or lat=...")
+        out[k] = float(v)
+    return out
 
 def parse_slash_command(raw: str, fallback_dataset: Optional[str]) -> ParsedCommand:
     tokens = shlex.split(raw)
@@ -202,7 +214,8 @@ def parse_slash_command(raw: str, fallback_dataset: Optional[str]) -> ParsedComm
                 elif name == "out":
                     out_path = Path(value)
                 elif name == "bins":
-                    options.setdefault("style", {})["bins"] = parse_bins(value)
+                    # options.setdefault("style", {})["bins"] = parse_bins(value)
+                    options["bins"] = parse_bins(value)
                 elif name == "filename":
                     options["filename"] = value
                 elif name in {"bbox", "box"}:

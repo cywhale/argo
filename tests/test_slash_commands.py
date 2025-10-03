@@ -1,6 +1,9 @@
 from pathlib import Path
 
-from argo_cli import ParsedCommand, exit_code_for_error, parse_slash_command, split_commands
+try:
+    from argo_cli import ParsedCommand, exit_code_for_error, parse_slash_command, split_commands
+except ImportError:  # fallback to renamed package
+    from cli import ParsedCommand, exit_code_for_error, parse_slash_command, split_commands
 
 
 def test_split_commands_handles_semicolons_and_quotes():
