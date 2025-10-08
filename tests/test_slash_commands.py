@@ -58,7 +58,13 @@ def test_parse_preview_with_box_alias():
 
 
 def test_parse_plot_with_output_and_flags(tmp_path):
-    raw = "/view plot ds1 timeseries --x TIME --y DOXY --size 800x600 --dpi 120 --grid --cmap plasma --order TIME:desc --out plot.png"
+    raw = (
+        "/view plot ds1 timeseries --x TIME --y DOXY "
+        "--size 800x600 --dpi 120 --grid --cmap plasma "
+        "--legend --legend-loc lower-left --legend-fontsize 10 "
+        "--point-size 24 --group-by PRES:25 --agg mean "
+        "--order TIME:desc --out plot.png"
+    )
     parsed = parse_slash_command(raw, None)
     assert parsed.request_type == "view.plot"
     style = parsed.request_payload.get("style")
@@ -67,8 +73,32 @@ def test_parse_plot_with_output_and_flags(tmp_path):
     assert style["dpi"] == 120
     assert style["grid"] is True
     assert style["cmap"] == "plasma"
+    assert style["legend"] is True
+    assert style["legend_loc"] == "lower-left"
+    assert style["legend_fontsize"] == "10"
+    assert style["pointSize"] == 24.0
     assert parsed.out_path == Path("plot.png")
     assert parsed.request_payload["orderBy"] == [{"col": "TIME", "dir": "desc"}]
+    assert parsed.request_payload["groupBy"] == ["PRES:25"]
+    assert parsed.request_payload["agg"] == "mean"
+
+
+def test_parse_plot_profile_with_bins_y():
+    raw = "/view plot ds1 profile --x TEMP --y PRES --bins y=10 --agg median"
+    parsed = parse_slash_command(raw, None)
+    assert parsed.request_type == "view.plot"
+    assert parsed.request_payload["bins"] == {"y": 10.0}
+    assert parsed.request_payload["agg"] == "median"
+
+
+def test_parse_bins_rejects_unknown_keys():
+    raw = "/view plot ds1 profile --x TEMP --y PRES --bins depth=10"
+    try:
+        parse_slash_command(raw, None)
+    except ValueError as exc:
+        assert "Unknown --bins key" in str(exc)
+    else:
+        raise AssertionError("Expected ValueError for unknown --bins key")
 
 
 def test_exit_code_for_known_errors():

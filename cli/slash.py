@@ -107,8 +107,8 @@ def parse_bins(value: str) -> Dict[str, float]:
             raise ValueError(f"Bad --bins item '{part}', expected k=v")
         k, v = part.split("=", 1)
         k = k.strip().lower()
-        if k not in ("lon", "lat"):
-            raise ValueError(f"Unknown --bins key '{k}', use lon=... or lat=...")
+        if k not in {"lon", "lat", "x", "y"}:
+            raise ValueError(f"Unknown --bins key '{k}', use lon=..., lat=..., x=..., or y=...")
         out[k] = float(v)
     return out
 
@@ -180,7 +180,9 @@ def parse_slash_command(raw: str, fallback_dataset: Optional[str]) -> ParsedComm
                 "start",
                 "end",
                 "cmap",
-                "order",
+                "point-size",
+                "legend-loc",
+                "legend-fontsize",
                 "group-by",
                 "agg",
             }:
@@ -214,7 +216,6 @@ def parse_slash_command(raw: str, fallback_dataset: Optional[str]) -> ParsedComm
                 elif name == "out":
                     out_path = Path(value)
                 elif name == "bins":
-                    # options.setdefault("style", {})["bins"] = parse_bins(value)
                     options["bins"] = parse_bins(value)
                 elif name == "filename":
                     options["filename"] = value
@@ -233,11 +234,17 @@ def parse_slash_command(raw: str, fallback_dataset: Optional[str]) -> ParsedComm
                     options["end"] = value
                 elif name == "cmap":
                     options.setdefault("style", {})["cmap"] = value
+                elif name in {"point-size", "pointSize", "pointsize"}:
+                    options.setdefault("style", {})["pointSize"] = float(value)
+                elif name == "legend-loc":
+                    options.setdefault("style", {})["legend_loc"] = value
+                elif name in {"legend-fontsize", "legend_fontsize", "legendFontsize"}:
+                    options.setdefault("style", {})["legend_fontsize"] = value
                 elif name == "group-by":
-                    options["groupBy"] = value
+                    options["groupBy"] = [item.strip() for item in value.split(",") if item.strip()]
                 elif name == "agg":
                     options["agg"] = value                
-            elif name in {"invert-y", "no-invert-y", "grid", "echo-json", "trim-dims"}:
+            elif name in {"invert-y", "no-invert-y", "grid", "echo-json", "trim-dims", "legend"}:
                 if name == "invert-y":
                     options.setdefault("style", {})["invert_y"] = True
                 elif name == "no-invert-y":
@@ -248,6 +255,8 @@ def parse_slash_command(raw: str, fallback_dataset: Optional[str]) -> ParsedComm
                     echo_json = True
                 elif name == "trim-dims":
                     options["trimDimensions"] = True
+                elif name == "legend":
+                    options.setdefault("style", {})["legend"] = True
             else:
                 raise ValueError(f"Unknown option --{name}")
 
@@ -330,6 +339,8 @@ def exit_code_for_error(code: Optional[str]) -> int:
     if code in {"FILTER_INVALID", "FILTER_UNSUPPORTED_OP", "COLUMN_UNKNOWN"}:
         return EXIT_FILTER
     if code in {"PLOT_FAIL", "EXPORT_FAIL"}:
+        return EXIT_OUTPUT
+    if code in {"BAD_BINS"}:
         return EXIT_OUTPUT
     if code in {"PLUGIN_NOT_AVAILABLE", "INTERNAL_ERROR"}:
         return EXIT_PLUGIN

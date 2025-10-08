@@ -44,13 +44,13 @@ argo> /view plot ds1 timeseries --x TIME --y TEMP --out temp.png
 
 All viewer features are available through slash commands in `odbargo-cli`.
 
-### Open
+### Open Argo NetCDF data file
 
 ```bash
 /view open <path> [as <datasetKey>]
 ```
 
-* Supports NetCDF via `h5netcdf` (preferred) or `netcdf4` (fallback).
+* For example: /view open path/argo_data.nc as ds1, then in subsequent commands, use ds1 as dataset alias. 
 
 ### List variables
 
@@ -58,10 +58,10 @@ All viewer features are available through slash commands in `odbargo-cli`.
 /view list_vars [<datasetKey>]
 ```
 
-### Preview
+### Dataset preview
 
 ```bash
-/view preview <datasetKey> \
+/view preview <datasetKey> [as <new datasetKey>] \
   [--cols TIME,PRES,TEMP] \
   [--filter "PRES BETWEEN 25 AND 100 AND TEMP > 0"] \
   [--order TIME:asc] [--cursor c1] [--limit 1000] \
@@ -69,40 +69,13 @@ All viewer features are available through slash commands in `odbargo-cli`.
   [--trim-dims]
 ```
 
-* Shows a bounded table (the plugin enforces upper caps).
+* Shows a bounded table, and this subset preview can be set as another new alias.
 * **Filters** can combine: value conditions, time window (`--start/--end`), spatial box (`--bbox`).
 * `--trim-dims` removes dimension coords from the output (default: keep TIME/LATITUDE/LONGITUDE).
 
-### Plot
-
-```bash
-/view plot <datasetKey> <timeseries|profile|map> \
-  --x <XCOL> --y <YCOL> \
-  [--group-by COL[:BIN],COL2[:BIN]] [--agg mean|median|count] \
-  [--filter …] [--order …] [--limit N] \
-  [--cmap viridis] [--size 900x500] [--dpi 120] [--title "..."] \
-  [--out plot.png]
-```
-
-* **timeseries**: usually `--x TIME --y <var>`; supports grouping/aggregation.
-* **profile**: usually `--x <var> --y PRES` (Y is inverted by default).
-* **map**: `--x LONGITUDE --y LATITUDE` (optional color by `--y <var>` or use `--cmap`).
-* `--group-by` accepts `COL` or `COL:BIN` (e.g., `PRES:10.0`, `TIME:1D`). Use with `--agg` to plot grouped series with legends.
-
-### Export
-
-```bash
-/view export <datasetKey> csv \
-  [--cols TIME,LATITUDE,LONGITUDE,PRES,TEMP,DOXY] \
-  [--filter …] [--order …] [--limit N] \
-  --out data.csv
-```
-
-* Streams CSV in chunks; the CLI aggregates and writes to `--out`.
-
 ---
 
-## Filtering (quick guide)
+### Filtering (quick guide)
 
 * DSL supports: `= != > >= < <=`, `BETWEEN a AND b`, `AND`, `OR`, parentheses.
 * Time literals use ISO‑8601 strings, e.g., `TIME >= "2019-01-01"`.
@@ -113,6 +86,45 @@ Examples:
 ```bash
 --filter "PRES BETWEEN 25 AND 100 AND DOXY > 0"
 --start 2010-01-01 --end 2011-01-01 --bbox 120,20,130,26
+```
+
+---
+
+### Plot
+
+```bash
+/view plot <datasetKey> <timeseries|profile|map> \
+  --x <XCOL> --y <YCOL> \
+  [--group-by COL[:BIN],COL2[:BIN]] [--agg mean|median|count] \
+  [--bins lon=0.5,lat=0.5|y=10] \
+  [--filter …] [--order …] [--limit N] \
+  [--cmap plasma] [--legend] [--legend-loc bottom] [--legend-fontsize small] \
+  [--point-size 24] [--size 900x500] [--dpi 120] [--title "..."] \
+  [--out plot.png]
+```
+
+* **timeseries**: typically `--x TIME --y <var>`; grouping with `--group-by` plus `--agg` plots one line per bucket.
+* **profile**: `--x <var> --y PRES` with depth inverted. Add `--bins y=<ΔP>` (e.g. `y=10`) to combine near-depth samples into one point per bin per group; omit to keep exact-depth profiles. Sort the data by `--order` is usually required for profile plot.
+* **map**: `--x LONGITUDE --y LATITUDE` (optionally color by `--z <var>` or `--cmap`). Use `--bins lon=…,lat=…` for gridded heatmaps; otherwise you get a scatter with `--point-size` control.
+* `--legend`, `--legend-loc`, `--legend-fontsize` help position multi-series legends outside the plot window; bottom/top placements reserve space automatically.
+
+Example (profile with depth bins and discrete groups):
+
+```bash
+/view plot ds1 profile --x TEMP --y PRES --group-by LATITUDE:2 --agg mean --bins lon=2,lat=2,y=2 --order PRES:desc --legend-loc bottom --cmap tab20
+
+/view plot ds1 map --y TEMP --filter "PRES >= 0 AND PRES <= 50" --bbox -100,-30,-20,30 --agg mean --point-size 15
+
+/view plot ds1 timeseries --x TEMP --y PSAL --group-by PRES:25 --agg mean --legend-loc "upper right" --cmap plasma --filter "PRES >= 0 AND PRES <= 250" --start 2002-01-01 --end 2017-01-01
+```
+
+### Export
+
+```bash
+/view export <datasetKey> csv \
+  [--cols TIME,LATITUDE,LONGITUDE,PRES,TEMP,DOXY] \
+  [--filter …] [--order …] [--limit N] \
+  --out data.csv
 ```
 
 ---
@@ -128,9 +140,9 @@ Examples:
 ## Build (advanced users)
 
 * Clone the repo and use the PyInstaller spec if you want a local viewer executable:
-
-  * `pyinstaller/odbargo-view.spec` (Agg‑only; curated `mpl-data`).
-* We do not publish the viewer binary by default due to size; the sdist install is the recommended path.
+  * `pyinstaller cli.spec` and `pyinstaller view.spec`.
+  * We do not publish the viewer binary by default due to size; the sdist install is the recommended path.
+* If you need to build the whole package: `python -m build`
 
 ---
 

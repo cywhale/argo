@@ -12,6 +12,7 @@ import argparse
 import asyncio
 import json
 import math
+import re
 import shlex
 import ssl
 import sys
@@ -36,6 +37,7 @@ ODBARGO_DEBUG = os.getenv("ODBARGO_DEBUG", "0") not in ("", "0", "false", "False
 from cli.slash import (
     HELP_ENTRIES,
     ParsedCommand,
+    parse_bins,
     exit_code_for_error,
     parse_slash_command,
     split_commands,
@@ -478,6 +480,18 @@ def parse_numeric_list(value: str) -> List[int]:
         if part:
             items.append(int(part))
     return items
+
+
+_WMO_PATTERN = re.compile(r"^\s*\d+(\s*,\s*\d+)*\s*$")
+
+
+def parse_wmo_input(value: str) -> List[int]:
+    if not _WMO_PATTERN.fullmatch(value):
+        raise ValueError("Expected comma-separated WMO numbers (e.g. 5903377,5903594)")
+    numbers = parse_numeric_list(value)
+    if not numbers:
+        raise ValueError("No WMO numbers provided")
+    return numbers
 
 
 # ---------------------------------------------------------------------------
@@ -1121,14 +1135,17 @@ class ArgoCLIApp:
         self._interactive = False
 
     async def _run_download_from_cli(self, line: str) -> None:
-        digits = [c for c in line if c.isdigit() or c == ","]
-        if not digits:
+        stripped = line.strip()
+        if not stripped:
             print("⚠️  No valid WMO IDs found. Use comma-separated numbers or slash commands.")
             return
+        if stripped.lower().startswith("view"):
+            print("⚠️  Slash commands must start with '/view ...' (e.g. /view open file.nc)")
+            return
         try:
-            wmo_list = parse_numeric_list("".join(digits))
-        except ValueError:
-            print("⚠️  Invalid WMO ID list")
+            wmo_list = parse_wmo_input(stripped)
+        except ValueError as exc:
+            print(f"⚠️  {exc}")
             return
         self._job_counter += 1
         job_id = f"cli-{self._job_counter}"
@@ -1256,22 +1273,19 @@ class ArgoCLIApp:
                     req["groupBy"] = gb
                 bins = parsed.request_payload.get("bins")
                 if isinstance(bins, str):
-                    # parse here too (CLI side), same rules as in slash parser
-                    bd = {}
-                    for it in bins.split(","):
-                        it = it.strip()
-                        if not it:
-                            continue
-                        if "=" not in it:
-                            raise ValueError(f"Bad --bins item '{it}', expected k=v")
-                        k, v = it.split("=", 1)
-                        k = k.strip().lower()
-                        if k not in ("lon", "lat"):
-                            raise ValueError(f"Unknown --bins key '{k}', use lon=... or lat=...")
-                        bd[k] = float(v)
-                    bins = bd
+                    bins = parse_bins(bins)
                 if isinstance(bins, dict):
-                    req["bins"] = bins                
+                    parsed_bins: Dict[str, float] = {}
+                    for key, val in bins.items():
+                        k = str(key).strip().lower()
+                        if k not in {"lon", "lat", "x", "y"}:
+                            raise ValueError(f"Unknown --bins key '{k}', use lon=..., lat=..., x=..., or y=...")
+                        try:
+                            parsed_bins[k] = float(val)
+                        except Exception as exc:
+                            raise ValueError(f"Bad --bins value for '{k}': {val!r}") from exc
+                    if parsed_bins:
+                        req["bins"] = parsed_bins                
 
                 if parsed.request_payload.get("agg"):
                     req["agg"] = parsed.request_payload["agg"]                 
@@ -1286,8 +1300,12 @@ class ArgoCLIApp:
 
                 msgs, png = await self.invoke_view_request_from_cli(req, want_binary=True)
 
-                # If viewer returned an error, show it and exit immediately (no timeout)
                 err = next((m for m in msgs if m.get("type") == "error"), None)
+                if err and err.get("code") == "COLUMN_UNKNOWN" and not self.plugin_ws_available():
+                    msgs, png = await self.invoke_view_request_from_cli(req, want_binary=True, force_stdio=True)
+                    err = next((m for m in msgs if m.get("type") == "error"), None)
+
+                # If viewer returned an error, show it and exit immediately (no timeout)
                 if err:
                     code = err.get("code", "PLOT_FAIL")
                     msg  = err.get("message", "Plot failed")

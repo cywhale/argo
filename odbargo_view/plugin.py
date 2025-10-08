@@ -1,6 +1,7 @@
 import json
 import sys
 import traceback
+import threading
 import io
 import math
 import hashlib
@@ -22,6 +23,8 @@ import numpy as np
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+from matplotlib import dates as mdates
+from matplotlib import ticker as mticker
 
 try:  # pandas is optional but required for preview/export convenience
     import pandas as pd
@@ -34,7 +37,6 @@ DEFAULT_PREVIEW_LIMIT = 500
 MAX_PREVIEW_ROWS = 1000
 MAX_PREVIEW_COLUMNS = 16
 MAX_FILTER_LENGTH = 2048
-
 
 class PluginError(Exception):
     def __init__(self, code: str, message: str, *, hint: Optional[str] = None, details: Optional[Dict[str, Any]] = None):
@@ -135,14 +137,23 @@ class DatasetStore:
         stored_columns = list(columns) if columns is not None else None
         self._subsets[subset_key] = SubsetSpec(parent_key=root, columns=stored_columns, filters=filtered_filters)
 
-    def close(self, key: str) -> None:
+    def close(self, key: str, *, async_close: bool = False) -> None:
         ds = self._datasets.pop(key, None)
-        if ds is not None:
-            ds.close()
         # remove any subsets referencing this key directly
         to_remove = [name for name, subset in self._subsets.items() if subset.parent_key == key or name == key]
         for name in to_remove:
             self._subsets.pop(name, None)
+        if ds is not None:
+            def _close_dataset() -> None:
+                try:
+                    ds.close()
+                except Exception as exc:  # pragma: no cover - defensive
+                    if ODBARGO_DEBUG:
+                        print(f"[plugin] dataset close error for {key}: {exc}", file=sys.stderr)
+            if async_close:
+                threading.Thread(target=_close_dataset, name=f"close-ds-{key}", daemon=True).start()
+            else:
+                _close_dataset()
 
     def close_all(self) -> None:  # pragma: no cover - safety
         for key in list(self._datasets.keys()):
@@ -943,6 +954,254 @@ class OdbArgoViewPlugin:
         lon_grid, lat_grid = _np.meshgrid(lon_vals, lat_vals)
         return lon_grid, lat_grid, pivot.to_numpy()
 
+    def _normalize_plot_message(self, raw: Dict[str, Any]) -> Dict[str, Any]:
+        params = raw.get("params")
+        if not isinstance(params, dict):
+            return dict(raw)
+        merged: Dict[str, Any] = dict(raw)
+        merged.update(params)
+        style: Dict[str, Any] = {}
+        if isinstance(params.get("style"), dict):
+            style.update(params["style"])
+        if isinstance(raw.get("style"), dict):
+            style.update(raw["style"])
+        if style:
+            merged["style"] = style
+        merged.pop("params", None)
+        group_by = merged.get("groupBy")
+        if isinstance(group_by, str):
+            merged["groupBy"] = [item.strip() for item in group_by.split(",") if item.strip()]
+        return merged
+
+    def _build_color_cycle(self, cmap_name: Optional[str], target_size: int) -> Optional[List[Tuple[float, ...]]]:
+        if not cmap_name:
+            return None
+        try:
+            cmap = plt.get_cmap(cmap_name)
+        except Exception as exc:
+            self._debug(f"color_cycle: invalid cmap '{cmap_name}' ({exc})", "-")
+            return None
+        try:
+            total = max(1, int(target_size))
+        except Exception:
+            total = 1
+        total = min(total, 64)
+        if total == 1:
+            positions = np.asarray([0.5])
+        else:
+            positions = np.linspace(0.02, 0.98, total)
+        colors: List[Tuple[float, ...]] = []
+        for pos in positions:
+            rgba = tuple(np.asarray(cmap(pos)).flatten())
+            colors.append(rgba)
+        return colors if colors else None
+
+    def _adjust_legend_margins(
+        self,
+        fig: plt.Figure,
+        loc_key: str,
+        orientation: str,
+        rows: int,
+    ) -> None:
+        if orientation != "horizontal" or rows <= 0:
+            return
+
+        per_row_margin = 0.045
+        extra = per_row_margin * rows
+        params = fig.subplotpars
+
+        if loc_key == "bottom":
+            base = max(0.1, params.bottom)
+            desired = min(0.5, base + extra)
+            if desired < params.top:
+                fig.subplots_adjust(bottom=desired)
+        elif loc_key == "top":
+            base_margin = max(0.06, 1.0 - params.top)
+            desired_margin = min(0.5, base_margin + extra)
+            new_top = max(params.bottom + 0.1, 1.0 - desired_margin)
+            new_top = min(params.top, new_top)
+            if new_top > params.bottom:
+                fig.subplots_adjust(top=new_top)
+
+    def _legend_params(
+        self,
+        style: Dict[str, Any],
+        msg_id: Optional[str],
+        series_count: int,
+    ) -> Tuple[str, Dict[str, Any], str, str]:
+        loc_raw = style.get("legend_loc")
+        if not loc_raw:
+            return "best", {"frameon": False}, "inside", "inside"
+        norm = str(loc_raw).strip().lower().replace('_', '-').replace(' ', '-')
+        outside = {
+            "top": ("upper center", {"bbox_to_anchor": (0.5, 1.12), "borderaxespad": 0.3}, "horizontal"),
+            "bottom": ("lower center", {"bbox_to_anchor": (0.5, -0.3), "borderaxespad": 0.3}, "horizontal"),
+            "right": ("center left", {"bbox_to_anchor": (1.02, 0.5), "borderaxespad": 0.3}, "vertical"),
+            "left": ("center right", {"bbox_to_anchor": (-0.02, 0.5), "borderaxespad": 0.3}, "vertical"),
+        }
+        if norm in outside:
+            loc, extra, orientation = outside[norm]
+            extra = dict(extra)
+            extra.setdefault("frameon", False)
+            return loc, extra, orientation, norm
+        builtin = {
+            "best": "best",
+            "upper-right": "upper right",
+            "upper-left": "upper left",
+            "lower-left": "lower left",
+            "lower-right": "lower right",
+            "upper-center": "upper center",
+            "lower-center": "lower center",
+            "center-left": "center left",
+            "center-right": "center right",
+            "center": "center",
+        }
+        if norm in builtin:
+            return builtin[norm], {"frameon": False}, "inside", norm
+        self._debug(f"legend: unknown loc '{loc_raw}', using 'best'", msg_id or "-")
+        return "best", {"frameon": False}, "inside", norm
+
+    def _legend_layout(
+        self,
+        orientation: str,
+        item_count: int,
+    ) -> Tuple[Optional[int], int]:
+        if item_count <= 0:
+            return None, 0
+
+        if orientation == "horizontal":
+            max_per_row = 6
+            per_row = max(1, min(item_count, max_per_row))
+            rows = int(math.ceil(item_count / per_row))
+            return per_row, rows
+
+        max_per_column = 12
+        if orientation == "vertical":
+            columns = max(1, int(math.ceil(item_count / max_per_column)))
+            rows = int(math.ceil(item_count / columns))
+            return columns, rows
+
+        if item_count > max_per_column:
+            columns = max(1, int(math.ceil(item_count / max_per_column)))
+            rows = int(math.ceil(item_count / columns))
+            return columns, rows
+        return None, 1
+
+    def _sample_cmap(self, cmap_name: Optional[str], n: int):
+        """
+        Return a list of RGBA colors sampled from a named colormap.
+        - Used for grouped timeseries/profile lines (categorical-ish palette).
+        - Keeps imports local to avoid heavy global imports during module load.
+        """
+        import numpy as np
+        import matplotlib.cm as cm
+
+        if n <= 0:
+            return []
+        name = cmap_name or "tab20"  # pleasant categorical default
+        try:
+            cmap = cm.get_cmap(name)
+        except Exception:
+            cmap = cm.get_cmap("tab20")
+
+        if n == 1:
+            return [cmap(0.0)]
+        xs = np.linspace(0.0, 1.0, num=n)
+        return [cmap(x) for x in xs]
+
+
+    def _format_time_axis(self, ax: plt.Axes) -> None:
+        # Only runs for datetime axes; keep labels horizontal and compact.
+        if pd is None:
+            return
+
+        samples: List[pd.Series] = []
+        for line in ax.get_lines():
+            data = line.get_xdata(orig=False)
+            if data is None or len(data) == 0:
+                continue
+            arr = np.asarray(data)
+            try:
+                if np.issubdtype(arr.dtype, np.datetime64):
+                    series = pd.to_datetime(arr, errors="coerce")
+                else:
+                    series = pd.to_datetime(mdates.num2date(arr), errors="coerce")
+            except Exception:
+                try:
+                    series = pd.to_datetime(arr, errors="coerce")
+                except Exception:
+                    continue
+            series = series.dropna()
+            if not series.empty:
+                samples.append(series if isinstance(series, pd.Series) else series.to_series(index=np.arange(len(series))))
+
+        if not samples:
+            return
+
+        dt = pd.concat(samples)
+        if dt.empty:
+            return
+
+        nums = mdates.date2num(dt.to_numpy())
+        span_days = float(np.nanmax(nums) - np.nanmin(nums))
+        if span_days <= 0:
+            return
+
+        ax.xaxis.get_offset_text().set_visible(False)
+        ax.tick_params(axis="x", which="major", rotation=0)
+
+        # Aim for ~8–10 ticks
+        TARGET = 9
+
+        if span_days <= 31:
+            # show mm-dd, put the year on the first tick or when a month flips
+            step = max(1, int(round(span_days / TARGET)))  # ~daily
+            locator = mdates.DayLocator(interval=step)
+
+            def _day_fmt(x, pos):
+                d = mdates.num2date(x)
+                lab = d.strftime("%m-%d")
+                if pos == 0 or d.day == 1:
+                    lab += f"\n{d.year}"
+                return lab
+
+            ax.xaxis.set_major_locator(locator)
+            ax.xaxis.set_major_formatter(mticker.FuncFormatter(_day_fmt))
+            return
+
+        # Up to ~13 months → month ticks
+        months = max(1, int(round(span_days / 30.4375)))
+        if months <= 13:
+            step = max(1, int(round(months / TARGET)))  # month interval
+            locator = mdates.MonthLocator(interval=step)
+
+            def _month_fmt(x, pos):
+                d = mdates.num2date(x)
+                lab = f"{d.month:02d}"
+                if pos == 0 or d.month == 1:
+                    lab += f"\n{d.year}"
+                return lab
+
+            ax.xaxis.set_major_locator(locator)
+            ax.xaxis.set_major_formatter(mticker.FuncFormatter(_month_fmt))
+            return
+
+        # Multi-year → yearly ticks
+        years = span_days / 365.25
+        step = max(1, int(round(years / TARGET)))
+        ax.xaxis.set_major_locator(mdates.YearLocator(base=step))
+        ax.xaxis.set_major_formatter(mdates.DateFormatter("%Y"))
+
+    def _valid_bins(self, bins: Any) -> bool:
+        if not isinstance(bins, dict):
+            return False
+        try:
+            lon_step = float(bins.get("lon", 0.0))
+            lat_step = float(bins.get("lat", 0.0))
+        except Exception:
+            return False
+        return lon_step > 0 and lat_step > 0
+
     def _extract_fields_from_json(self, node: Dict[str, Any]) -> List[str]:
         fields: List[str] = []
         if not node:
@@ -1140,64 +1399,67 @@ class OdbArgoViewPlugin:
             # Defensive: report concrete cause rather than generic INTERNAL_ERROR black-boxing it
             raise PluginError("INTERNAL_ERROR", f"Preview failed: {type(e).__name__}: {e}")
 
-    def _handle_plot(self, msg_id: str, message: Dict[str, Any]) -> None:
-        params = message.get("params")
-        if isinstance(params, dict):
-            merged: Dict[str, Any] = dict(params)
-            for key in ("datasetKey", "kind", "style", "filter", "bins", "agg", "x", "y", "z", "limit", "orderBy"):
-                if key not in merged and key in message:
-                    merged[key] = message[key]
-            message = merged
+    def _render_plot(self, raw_message: Dict[str, Any], msg_id: Optional[str] = None) -> bytes:
+        message = self._normalize_plot_message(raw_message)
         dataset_key = message.get("datasetKey")
+        if not dataset_key:
+            raise PluginError("DATASET_NOT_FOUND", "Missing datasetKey")
         kind = message.get("kind")
+        if not kind:
+            raise PluginError("PLOT_FAIL", "Missing plot kind")
         x_col = message.get("x")
         y_col = message.get("y")
-        style = message.get("style") or {}
+        style = dict(message.get("style") or {})
+        bins_param: Dict[str, float] = {}
+        style_bins = style.get("bins")
+        if isinstance(style_bins, dict):
+            for key, value in style_bins.items():
+                k = str(key).strip().lower()
+                try:
+                    bins_param[k] = float(value)
+                except Exception:
+                    raise PluginError("BAD_BINS", f"bins.{k} must be numeric")
+        message_bins = message.get("bins")
+        if isinstance(message_bins, dict):
+            for key, value in message_bins.items():
+                k = str(key).strip().lower()
+                try:
+                    bins_param[k] = float(value)
+                except Exception:
+                    raise PluginError("BAD_BINS", f"bins.{k} must be numeric")
+        elif message_bins is not None and not isinstance(message_bins, dict):
+            raise PluginError("BAD_BINS", "bins must be an object with numeric values")
+        def _bool_opt(value, default=False):
+            if value is None:
+                return default
+            if isinstance(value, bool):
+                return value
+            if isinstance(value, (int, float)):
+                return value != 0
+            return str(value).lower() not in {"false", "0", "no", "off"}
 
-        # NEW: options for grouping/aggregation
-        group_by = message.get("groupBy") or []                    # e.g., ["WMO"] or ["PRES:10.0"] or ["TIME:1D"]
+        group_by = message.get("groupBy") or []
         agg = message.get("agg") or "mean"
-        self._debug(f"plot recv: kind={kind} x={x_col} y={y_col} groupBy={group_by} agg={agg}", msg_id)
-        reducer = self._pick_reducer(agg)                          # may be "count" sentinel
+        self._debug(f"plot recv: kind={kind} x={x_col} y={y_col} groupBy={group_by} agg={agg}", msg_id or "-")
+        reducer = self._pick_reducer(agg)
 
         base_ds, subset_spec = self.store.resolve(dataset_key)
         df = _build_dataframe(base_ds)
-        allowed_columns = subset_spec.columns if subset_spec and subset_spec.columns is not None else None
+        allowed_columns = subset_spec.columns if (subset_spec and subset_spec.columns is not None) else None
 
-        # Merge subset filter + request filter
         filter_mask, _ = self._parse_filter(message, df, base_filters=subset_spec.filters if subset_spec else None)
         df = df[filter_mask]
-
-        # Order (do NOT block on allowed_columns for coords)
         df = self._apply_order(df, message.get("orderBy") or [], allowed_columns=None)
-        self._debug(f"plot df: rows={len(df)} cols={list(df.columns)[:8]}...", msg_id)
 
-        # Optional limit (post-filter, post-order)
         try:
             limit = int(message.get("limit") or 0)
         except Exception:
             limit = 0
         if limit > 0:
             df = df.head(limit)
-
         if df.empty:
             raise PluginError("PLOT_FAIL", "Filter returned no rows")
-
-        import pandas as pd
-        import numpy as np
-
-        def _exists(col: Optional[str]) -> bool:
-            return bool(col) and col in df.columns
-
-        # Pre-sort / normalize time for timeseries
-        if kind == "timeseries" and x_col:
-            if x_col not in df.columns:
-                raise PluginError("COLUMN_UNKNOWN", f"Unknown column '{x_col}'")
-            try:
-                sorted_values = pd.to_datetime(df[x_col])
-            except Exception:
-                sorted_values = df[x_col]
-            df = df.assign(**{x_col: sorted_values}).sort_values(by=x_col)
+        self._debug(f"plot df: rows={len(df)} cols={list(df.columns)[:8]}...", msg_id or "-")
 
         width = style.get("width", 800)
         height = style.get("height", 600)
@@ -1206,217 +1468,339 @@ class OdbArgoViewPlugin:
 
         fig, ax = plt.subplots(figsize=figsize, dpi=dpi)
         try:
+
+            def _exists(col: Optional[str]) -> bool:
+                return bool(col) and col in df.columns
+
+            def plot_line(x_vals, y_vals, marker=None, label=None):
+                kwargs = {
+                    "marker": marker if marker is not None else style.get("marker", ""),
+                    "linestyle": style.get("line", "-"),
+                    "alpha": float(style.get("alpha", 1.0)),
+                }
+                if label is not None:
+                    kwargs["label"] = str(label)
+                ax.plot(x_vals, y_vals, **kwargs)
+
+            legend_enabled = _bool_opt(style.get('legend'), True)
+            legend_always = _bool_opt(style.get('legend_always'), False)
+            try:
+                max_series_allowed = max(1, int(style.get('max_series', 24)))
+            except Exception:
+                max_series_allowed = 24
+
+            color_cycle = self._build_color_cycle(style.get("cmap"), max_series_allowed)
+
             if kind == "timeseries":
-                import pandas as pd
-
-                # --- normalize and log groupBy/agg ---------------------------------
-                group_by = message.get("groupBy") or []
-                if isinstance(group_by, str):
-                    group_by = [s.strip() for s in group_by.split(",") if s.strip()]
-                agg = message.get("agg") or "mean"
-                reducer = self._pick_reducer(agg)
-                self._debug(f"plot recv: kind=timeseries x={x_col} y={y_col} groupBy={group_by} agg={agg}", msg_id)
-
-                # --- basic guards ---------------------------------------------------
-                def _exists(col: Optional[str]) -> bool:
-                    return bool(col) and col in df.columns
                 if not (_exists(x_col) and _exists(y_col)):
                     raise PluginError("COLUMN_UNKNOWN", "timeseries plot requires existing x and y columns")
-
-                # presort by time if possible
                 try:
                     df[x_col] = pd.to_datetime(df[x_col], errors="coerce")
                 except Exception:
                     pass
                 df = df.sort_values(by=x_col)
 
-                # --- optional limit -------------------------------------------------
-                try:
-                    limit = int(message.get("limit") or 0)
-                except Exception:
-                    limit = 0
-                if limit > 0:
-                    df = df.head(limit)
+                if color_cycle:
+                    ax.set_prop_cycle(color=color_cycle)
 
-                # --- no grouping → single series -----------------------------------
-                if not group_by:
-                    self._debug("timeseries: grouping disabled → single series", msg_id)
-                    ax.plot(
-                        df[x_col], df[y_col],
-                        marker=style.get("marker", ""),
-                        linestyle=style.get("line", "-"),
-                        alpha=float(style.get("alpha", 1.0)),
-                    )
-                    ax.set_xlabel(x_col); ax.set_ylabel(y_col)
-                    # (title/grid handled below)
-                else:
-                    # --- groupBy parsing (discrete / numeric bins / TIME:freq) -----
-                    resample_freq: Optional[str] = None
-                    group_cols: List[str] = []
-                    work = df
-                    for spec in group_by:
-                        work, gcol, freq = self._apply_groupby_bins(work, str(spec))
-                        if freq:
-                            resample_freq = freq
-                        else:
-                            group_cols.append(gcol)
-                    self._debug(f"group parse → cols={group_cols or '[]'} resample={resample_freq or 'None'}", msg_id)
+                work = df
+                resample_freq: Optional[str] = None
+                group_cols: List[str] = []
+                for spec in group_by:
+                    work, gcol, freq = self._apply_groupby_bins(work, str(spec))
+                    if freq:
+                        resample_freq = freq
+                    elif gcol:
+                        group_cols.append(gcol)
 
-                    MAX_SERIES = int(style.get("max_series", 24))
-                    legend_on = bool(style.get("legend", True))
-
-                    if resample_freq:
-                        # ensure datetime index on x
-                        try:
-                            work[x_col] = pd.to_datetime(work[x_col], errors="coerce")
-                        except Exception:
-                            pass
-
-                        if group_cols:
-                            groups = work.groupby(group_cols, dropna=False)
-                            # We can’t cheaply know count without materializing; log the keys we plot
-                            plotted = 0
-                            for keys, g in groups:
-                                if plotted >= MAX_SERIES:
-                                    break
-                                rs = g.set_index(x_col).resample(resample_freq)[y_col]
-                                g2 = (rs.count().reset_index() if reducer == "count" else rs.apply(reducer).reset_index())
-                                label = keys if isinstance(keys, (tuple, list)) else (keys,)
-                                ax.plot(
-                                    g2[x_col], g2[y_col],
-                                    marker=style.get("marker", ""),
-                                    linestyle=style.get("line", "-"),
-                                    alpha=float(style.get("alpha", 1.0)),
-                                    label=str(label),
-                                )
-                                plotted += 1
-                            self._debug(f"grouped (resample={resample_freq}) series plotted={plotted}", msg_id)
-                        else:
-                            rs = work.set_index(x_col).resample(resample_freq)[y_col]
+                if resample_freq:
+                    try:
+                        work[x_col] = pd.to_datetime(work[x_col], errors="coerce")
+                    except Exception:
+                        pass
+                    if group_cols:
+                        plotted = 0
+                        for keys, g in work.groupby(group_cols, dropna=False):
+                            rs = g.set_index(x_col).resample(resample_freq)[y_col]
                             g2 = (rs.count().reset_index() if reducer == "count" else rs.apply(reducer).reset_index())
-                            ax.plot(
-                                g2[x_col], g2[y_col],
-                                marker=style.get("marker", ""),
-                                linestyle=style.get("line", "-"),
-                                alpha=float(style.get("alpha", 1.0)),
-                            )
-                            self._debug("resample only → single aggregated series", msg_id)
+                            label = keys if isinstance(keys, (tuple, list)) else (keys,)
+                            plot_line(g2[x_col], g2[y_col], label=label)
+                            plotted += 1
+                            if plotted >= max_series_allowed:
+                                break
+                        self._debug(f"timeseries grouped (resample={resample_freq}) series plotted={plotted}", msg_id or "-")
                     else:
-                        # discrete/bin grouping — aggregate per x for each group
-                        if not group_cols:
-                            ax.plot(
-                                df[x_col], df[y_col],
-                                marker=style.get("marker", ""),
-                                linestyle=style.get("line", "-"),
-                                alpha=float(style.get("alpha", 1.0)),
-                            )
-                            self._debug("no group_cols after parsing → single series", msg_id)
+                        rs = work.set_index(x_col).resample(resample_freq)[y_col]
+                        g2 = (rs.count().reset_index() if reducer == "count" else rs.apply(reducer).reset_index())
+                        plot_line(g2[x_col], g2[y_col])
+                        self._debug("timeseries resample-only → single aggregated series", msg_id or "-")
+                elif group_cols:
+                    plotted = 0
+                    for keys, g in work.groupby(group_cols, dropna=False):
+                        if reducer == "count":
+                            g2 = g.groupby(x_col, dropna=False)[y_col].count().reset_index()
                         else:
-                            groups = work.groupby(group_cols, dropna=False)
-                            plotted = 0
-                            for keys, g in groups:
-                                if plotted >= MAX_SERIES:
-                                    break
-                                if reducer == "count":
-                                    g2 = g.groupby(x_col, dropna=False)[y_col].count().reset_index()
-                                else:
-                                    g2 = g.groupby(x_col, dropna=False)[y_col].apply(reducer).reset_index()
-                                label = keys if isinstance(keys, (tuple, list)) else (keys,)
-                                ax.plot(
-                                    g2[x_col], g2[y_col],
-                                    marker=style.get("marker", ""),
-                                    linestyle=style.get("line", "-"),
-                                    alpha=float(style.get("alpha", 1.0)),
-                                    label=str(label),
-                                )
-                                plotted += 1
-                            self._debug(f"grouped (discrete/bin) series plotted={plotted}", msg_id)
+                            g2 = g.groupby(x_col, dropna=False)[y_col].apply(reducer).reset_index()
+                        label = keys if isinstance(keys, (tuple, list)) else (keys,)
+                        plot_line(g2[x_col], g2[y_col], label=label)
+                        plotted += 1
+                        if plotted >= max_series_allowed:
+                            break
+                    self._debug(f"timeseries grouped (discrete/bin) series plotted={plotted}", msg_id or "-")
+                else:
+                    plot_line(df[x_col], df[y_col])
+                    self._debug("timeseries: grouping disabled → single series", msg_id or "-")
 
-                    if legend_on:
-                        ax.legend()
-                    ax.set_xlabel(x_col); ax.set_ylabel(y_col)
+                ax.set_xlabel(x_col)
+                ax.set_ylabel(y_col)
+                self._format_time_axis(ax)
 
             elif kind == "profile":
-                y_axis = y_col or "PRES"
-                if not (_exists(x_col) and _exists(y_axis)):
+                y_col = y_col or "PRES"
+                if not x_col:
+                    raise PluginError("PLOT_FAIL", "profile plot requires --x <var> (X vs PRES)")
+                if not (_exists(x_col) and _exists(y_col)):
                     raise PluginError("COLUMN_UNKNOWN", "profile plot requires existing x and y (default PRES)")
-                ax.plot(df[x_col], df[y_axis],
-                        marker=style.get("marker", "."),
-                        linestyle=style.get("line", "-"),
-                        alpha=style.get("alpha", 1.0))
+
+                bins_y: Optional[float] = None
+                if "y" in bins_param:
+                    try:
+                        bins_y = float(bins_param["y"])
+                    except Exception:
+                        raise PluginError("BAD_BINS", "bins.y must be a positive float")
+                    if not np.isfinite(bins_y) or bins_y <= 0:
+                        raise PluginError("BAD_BINS", "bins.y must be a positive float")
+
+                # reducer from --agg
+                # gather group-by tokens and resolve into real columns
+                gb_tokens = message.get("groupBy") or []
+                gb_tokens = [t for t in gb_tokens if t]
+
+                df_gb = df  # we may add derived columns here
+                gb_cols: List[str] = []          # actual DataFrame columns used to group
+                gb_meta: List[Tuple[str, Optional[float]]] = []  # (base_name, bin_step or None)
+
+                if color_cycle:
+                    ax.set_prop_cycle(color=color_cycle)
+
+                for tok in gb_tokens:
+                    if ":" in tok:
+                        base, step_str = tok.split(":", 1)
+                        base = base.strip()
+                        if base not in df_gb.columns:
+                            raise PluginError("COLUMN_UNKNOWN", f"Unknown group-by column '{base}'")
+                        try:
+                            step = float(step_str)
+                        except Exception:
+                            raise PluginError("BAD_GROUPBY", f"Non-numeric bin step in '{tok}'")
+                        if step <= 0:
+                            raise PluginError("BAD_GROUPBY", f"Bin step must be > 0 in '{tok}'")
+                        new_col = f"__gb_{base}_bin__"
+                        vals = pd.to_numeric(df_gb[base], errors="coerce").to_numpy(dtype=float)
+                        df_gb = df_gb.assign(**{new_col: np.floor(vals / step) * step})
+                        gb_cols.append(new_col)
+                        gb_meta.append((base, step))
+                    else:
+                        base = tok.strip()
+                        if base not in df_gb.columns:
+                            raise PluginError("COLUMN_UNKNOWN", f"Unknown group-by column '{base}'")
+                        gb_cols.append(base)
+                        gb_meta.append((base, None))
+
+                # pretty legend label from group key
+                def _label_from_key(key) -> str:
+                    if not isinstance(key, tuple):
+                        key = (key,)
+                    parts = []
+                    for (base, step), val in zip(gb_meta, key):
+                        if step is not None:
+                            parts.append(f"{base}:{val:.0f}")
+                        else:
+                            parts.append(f"{base}={val}")
+                    return ", ".join(parts)
+
+                # optional sort by depth
+                try:
+                    df_gb = df_gb.sort_values(by=y_col)
+                except Exception:
+                    pass
+
+                # optional thin/markers/alpha (defaults conservative)
+                lw = float(style.get("linewidth", 1.2))
+                mk = style.get("marker", "")  # default no markers
+                alpha = float(style.get("alpha", 0.95))
+
+                # palette
+                n_groups = len(df_gb.groupby(gb_cols)) if gb_cols else 1
+                colors = self._sample_cmap(style.get("cmap"), n_groups)
+                color_iter = iter(colors) if colors else None
+
+                # collapse duplicates (or bins.y) at the same depth → one X per Y per group
+                def _collapse(g: pd.DataFrame) -> pd.DataFrame:
+                    frame = g
+                    depth_field = y_col
+                    bin_col = "__pres_bin__"
+                    if bins_y is not None:
+                        numeric = pd.to_numeric(frame[y_col], errors="coerce")
+                        valid_mask = numeric.notna()
+                        if not valid_mask.any():
+                            return pd.DataFrame(columns=[y_col, x_col])
+                        frame = frame.loc[valid_mask].copy()
+                        numeric = numeric.loc[valid_mask]
+                        frame[bin_col] = np.floor(numeric.to_numpy() / bins_y) * bins_y
+                        depth_field = bin_col
+                    if frame.empty:
+                        return pd.DataFrame(columns=[y_col, x_col])
+                    if reducer == "count":
+                        grouped = frame.groupby(depth_field, dropna=False)[x_col].count()
+                    else:
+                        grouped = frame.groupby(depth_field, dropna=False)[x_col].apply(reducer)
+                    result = grouped.reset_index()
+                    if depth_field != y_col:
+                        result = result.rename(columns={depth_field: y_col})
+                    return result.sort_values(y_col)
+
+                if gb_cols:
+                    for i, (gk, gdf) in enumerate(df_gb.groupby(gb_cols)):
+                        adf = _collapse(gdf)
+                        if adf.empty:
+                            continue
+                        color = next(color_iter, None) if color_iter is not None else None
+                        ax.plot(
+                            adf[x_col].to_numpy(),
+                            adf[y_col].to_numpy(),
+                            color=color,
+                            linewidth=lw,
+                            marker=mk,
+                            alpha=alpha,
+                            label=_label_from_key(gk),
+                        )
+                    # legend placement you already handle elsewhere (bottom/outside)
+                else:
+                    adf = _collapse(df_gb)
+                    if not adf.empty:
+                        color = next(color_iter, None) if color_iter is not None else None
+                        ax.plot(adf[x_col].to_numpy(), adf[y_col].to_numpy(),
+                                linewidth=lw, marker=mk, alpha=alpha, color=color)
+
                 ax.set_xlabel(x_col)
-                ax.set_ylabel(y_axis)
+                ax.set_ylabel(y_col)
                 if style.get("invert_y", True):
                     ax.invert_yaxis()
+                if style.get("grid"):
+                    ax.grid(True)
 
             elif kind == "map":
-                # Resolve axes/colour column
                 lon_col, lat_col, value_col = self._resolve_map_columns(df, message, None)
                 if lon_col not in df.columns or lat_col not in df.columns:
                     raise PluginError("PLOT_FAIL", "map plot requires longitude and latitude columns")
-
                 cmap = style.get("cmap", "viridis")
-
-                # Accept bins/agg from message or style (same as WS helper)
-                bins_param = message.get("bins") or style.get("bins") or {}
-                agg_param  = message.get("agg")  or (bins_param.get("agg") if isinstance(bins_param, dict) else None)
-
-                # Breadcrumbs (visible when ODBARGO_DEBUG=1)
-                self._debug(
-                    f"map: rows={len(df)} z={value_col!r} bins={bins_param!r} agg={agg_param!r}",
-                    msg_id,
-                )
-
-                def _valid_bins(b):
-                    try:
-                        return (
-                            isinstance(b, dict)
-                            and float(b.get("lon", 0.0)) > 0.0
-                            and float(b.get("lat", 0.0)) > 0.0
-                        )
-                    except Exception:
-                        return False
-
-                use_grid = _valid_bins(bins_param) and bool(value_col)
-
-                # Try to build a regular 2D grid for pcolormesh
-                grid = self._build_map_grid(
-                    df, lon_col, lat_col, value_col, bins_param, agg_param
-                ) if use_grid else None
-
+                agg_param = message.get("agg") or (bins_param.get("agg") if isinstance(bins_param, dict) else None)
+                use_grid = self._valid_bins(bins_param) and bool(value_col)
+                grid = self._build_map_grid(df, lon_col, lat_col, value_col, bins_param, agg_param) if use_grid else None
                 if use_grid and grid is not None:
                     lon_grid, lat_grid, value_grid = grid
-                    self._debug(f"map: gridded shape={value_grid.shape}", msg_id)
+                    self._debug(f"map: gridded shape={value_grid.shape}", msg_id or "-")
                     pcm = ax.pcolormesh(lon_grid, lat_grid, value_grid, shading="auto", cmap=cmap)
                     cbar = fig.colorbar(pcm, ax=ax)
                     if value_col:
                         cbar.set_label(value_col)
                 else:
-                    # Fallback to scatter if no/invalid bins or grid collapsed
                     reason = "no/invalid bins" if not use_grid else "grid=None"
-                    self._debug(f"map: fallback scatter ({reason})", msg_id)
-
+                    self._debug(f"map: fallback scatter ({reason})", msg_id or "-")
                     color_values = df[value_col] if value_col and value_col in df.columns else None
-                    sc = ax.scatter(
-                        df[lon_col],
-                        df[lat_col],
-                        c=color_values,
-                        cmap=cmap if color_values is not None else None,
-                        s=float(style.get("pointSize") or message.get("pointSize") or 36),
-                        alpha=style.get("alpha", 0.75),
-                        edgecolors=style.get("edgecolor", "none"),
-                        marker=style.get("marker", "o"),
+                    point_size = (
+                        style.get("pointSize")
+                        or message.get("pointSize")
+                        or style.get("scatterSize")
+                        or 36
                     )
+                    scatter_kwargs = {
+                        "x": df[lon_col],
+                        "y": df[lat_col],
+                        "s": float(point_size),
+                        "alpha": style.get("alpha", 0.75),
+                        "edgecolors": style.get("edgecolor", "none"),
+                        "marker": style.get("marker", "o"),
+                    }
+                    if color_values is not None:
+                        scatter_kwargs["c"] = color_values
+                        scatter_kwargs["cmap"] = cmap
+                    sc = ax.scatter(**scatter_kwargs)
                     if color_values is not None:
                         cbar = fig.colorbar(sc, ax=ax)
                         cbar.set_label(value_col)
-
                 ax.set_xlabel(lon_col)
                 ax.set_ylabel(lat_col)
                 if style.get("grid"):
                     ax.set_aspect("equal", adjustable="datalim")
             else:
                 raise PluginError("PLOT_FAIL", f"Unsupported plot kind '{kind}'")
+
+            handles, labels = ax.get_legend_handles_labels()
+            legend_pairs = [
+                (handle, label)
+                for handle, label in zip(handles, labels)
+                if label and not str(label).startswith("_")
+            ]
+            series_count = len(legend_pairs)
+            show_legend = (
+                legend_enabled
+                and kind in {"timeseries", "profile"}
+                and series_count > 0
+                and (series_count > 1 or legend_always)
+            )
+            if show_legend:
+                loc, legend_extra, legend_orientation, legend_loc_key = self._legend_params(style, msg_id, series_count)
+                legend_kwargs = dict(legend_extra)
+                legend_size = style.get("legend_fontsize", "small")
+                try:
+                    legend_size = float(legend_size)
+                except Exception:
+                    pass
+
+                legend_ncol, legend_rows = self._legend_layout(legend_orientation, series_count)
+                if legend_ncol is not None:
+                    legend_kwargs["ncol"] = legend_ncol
+                else:
+                    legend_rows = max(legend_rows, 1)
+
+                if legend_orientation == "horizontal" and legend_rows > 1:
+                    anchor = legend_kwargs.get("bbox_to_anchor")
+                    if isinstance(anchor, tuple) and len(anchor) == 2:
+                        x_anchor, y_anchor = anchor
+                        offset = 0.08 * (legend_rows - 1)
+                        if legend_loc_key == "top":
+                            y_anchor += offset
+                        elif legend_loc_key == "bottom":
+                            y_anchor -= offset
+                        legend_kwargs["bbox_to_anchor"] = (x_anchor, y_anchor)
+
+                if legend_loc_key in {"top", "bottom"}:
+                    self._adjust_legend_margins(fig, legend_loc_key, legend_orientation, legend_rows)
+
+                legend_handles = [handle for handle, _ in legend_pairs]
+                legend_labels = [str(label) for _, label in legend_pairs]
+
+                try:
+                    ax.legend(
+                        legend_handles,
+                        legend_labels,
+                        loc=loc,
+                        fontsize=legend_size,
+                        **legend_kwargs,
+                    )
+                except Exception as exc:
+                    self._debug(f"legend: fallback to 'best' ({exc})", msg_id or "-")
+                    try:
+                        ax.legend(
+                            legend_handles,
+                            legend_labels,
+                            loc="best",
+                            fontsize=legend_size,
+                        )
+                    except Exception:
+                        pass
 
             if style.get("title"):
                 ax.set_title(style["title"])
@@ -1431,7 +1815,10 @@ class OdbArgoViewPlugin:
         finally:
             plt.close(fig)
 
-        self._debug(f"plot ready: size={len(png_bytes)} bytes", msg_id)
+        return png_bytes
+
+    def _handle_plot(self, msg_id: str, message: Dict[str, Any]) -> None:
+        png_bytes = self._render_plot(message, msg_id)
         self.send_json({
             "op": "plot_blob",
             "msgId": msg_id,
@@ -1441,7 +1828,6 @@ class OdbArgoViewPlugin:
         sys.stdout.flush()
         sys.stdout.buffer.write(png_bytes)
         sys.stdout.flush()
-
     def _handle_export(self, msg_id: str, message: Dict[str, Any]) -> None:
         dataset_key = message.get("datasetKey")
         export_format = message.get("format", "csv")
@@ -1511,7 +1897,7 @@ class OdbArgoViewPlugin:
         dataset_key = message.get("datasetKey")
         if not dataset_key:
             raise PluginError("DATASET_NOT_FOUND", "Missing datasetKey")
-        self.store.close(dataset_key)
+        self.store.close(dataset_key, async_close=True)
         self.send_json({
             "op": "close_dataset.ok",
             "msgId": msg_id,
@@ -1519,266 +1905,7 @@ class OdbArgoViewPlugin:
         })
 
 def _compute_plot_bytes(plugin: OdbArgoViewPlugin, message: Dict[str, Any]) -> bytes:
-    """
-    WS-mode plot helper that shares behavior with _handle_plot:
-    - honors filter/order/limit
-    - supports groupBy (discrete, numeric bins col:width, TIME:freq) + agg
-    - emits debug breadcrumbs via plugin._debug(...)
-    """
-    import pandas as pd
-    import numpy as np
-    import io
-
-    dataset_key = message.get("datasetKey")
-    kind = message.get("kind")
-    x_col = message.get("x")
-    y_col = message.get("y")
-    style = message.get("style") or {}
-    msg_id = message.get("msgId")
-
-    # normalize grouping inputs
-    group_by = message.get("groupBy") or []
-    if isinstance(group_by, str):
-        group_by = [s.strip() for s in group_by.split(",") if s.strip()]
-    agg = message.get("agg") or "mean"
-    reducer = plugin._pick_reducer(agg)
-
-    plugin._debug(f"plot recv: kind={kind} x={x_col} y={y_col} groupBy={group_by} agg={agg}", msg_id)
-
-    base_ds, subset_spec = plugin.store.resolve(dataset_key)
-    df = _build_dataframe(base_ds)
-    allowed_columns = subset_spec.columns if (subset_spec and subset_spec.columns is not None) else None
-
-    # filter + order
-    filter_mask, _ = plugin._parse_filter(message, df, base_filters=subset_spec.filters if subset_spec else None)
-    df = df[filter_mask]
-    df = plugin._apply_order(df, message.get("orderBy") or [], allowed_columns=None)
-
-    # optional limit
-    try:
-        limit = int(message.get("limit") or 0)
-    except Exception:
-        limit = 0
-    if limit > 0:
-        df = df.head(limit)
-
-    if df.empty:
-        raise PluginError("PLOT_FAIL", "Filter returned no rows")
-
-    plugin._debug(f"plot df: rows={len(df)} cols={list(df.columns)[:8]}...", msg_id)
-
-    width = style.get("width", 800)
-    height = style.get("height", 600)
-    dpi = style.get("dpi", 120)
-    figsize = (width / dpi, height / dpi)
-
-    fig, ax = plt.subplots(figsize=figsize, dpi=dpi)
-    try:
-        def _exists(col: Optional[str]) -> bool:
-            return bool(col) and col in df.columns
-
-        if kind == "timeseries":
-            if not (_exists(x_col) and _exists(y_col)):
-                raise PluginError("COLUMN_UNKNOWN", "timeseries plot requires existing x and y columns")
-
-            # normalize/sort time
-            try:
-                df[x_col] = pd.to_datetime(df[x_col], errors="coerce")
-            except Exception:
-                pass
-            df = df.sort_values(by=x_col)
-
-            if not group_by:
-                ax.plot(
-                    df[x_col], df[y_col],
-                    marker=style.get("marker", ""),
-                    linestyle=style.get("line", "-"),
-                    alpha=float(style.get("alpha", 1.0)),
-                )
-                plugin._debug("timeseries: grouping disabled → single series", msg_id)
-            else:
-                # parse groupBy specs → (group_cols, resample_freq)
-                resample_freq: Optional[str] = None
-                group_cols: List[str] = []
-                work = df
-                for spec in group_by:
-                    work, gcol, freq = plugin._apply_groupby_bins(work, str(spec))
-                    if freq:
-                        resample_freq = freq
-                    else:
-                        group_cols.append(gcol)
-                plugin._debug(f"group parse → cols={group_cols or '[]'} resample={resample_freq or 'None'}", msg_id)
-
-                MAX_SERIES = int(style.get("max_series", 24))
-                legend_on = bool(style.get("legend", True))
-
-                if resample_freq:
-                    # ensure datetime index on x
-                    try:
-                        work[x_col] = pd.to_datetime(work[x_col], errors="coerce")
-                    except Exception:
-                        pass
-
-                    if group_cols:
-                        groups = work.groupby(group_cols, dropna=False)
-                        plotted = 0
-                        for keys, g in groups:
-                            if plotted >= MAX_SERIES:
-                                break
-                            rs = g.set_index(x_col).resample(resample_freq)[y_col]
-                            g2 = (rs.count().reset_index() if reducer == "count" else rs.apply(reducer).reset_index())
-                            label = keys if isinstance(keys, (tuple, list)) else (keys,)
-                            ax.plot(
-                                g2[x_col], g2[y_col],
-                                marker=style.get("marker", ""),
-                                linestyle=style.get("line", "-"),
-                                alpha=float(style.get("alpha", 1.0)),
-                                label=str(label),
-                            )
-                            plotted += 1
-                        plugin._debug(f"grouped (resample={resample_freq}) series plotted={plotted}", msg_id)
-                    else:
-                        rs = work.set_index(x_col).resample(resample_freq)[y_col]
-                        g2 = (rs.count().reset_index() if reducer == "count" else rs.apply(reducer).reset_index())
-                        ax.plot(
-                            g2[x_col], g2[y_col],
-                            marker=style.get("marker", ""),
-                            linestyle=style.get("line", "-"),
-                            alpha=float(style.get("alpha", 1.0)),
-                        )
-                        plugin._debug("resample only → single aggregated series", msg_id)
-                else:
-                    if not group_cols:
-                        ax.plot(
-                            df[x_col], df[y_col],
-                            marker=style.get("marker", ""),
-                            linestyle=style.get("line", "-"),
-                            alpha=float(style.get("alpha", 1.0)),
-                        )
-                        plugin._debug("no group_cols after parsing → single series", msg_id)
-                    else:
-                        groups = work.groupby(group_cols, dropna=False)
-                        plotted = 0
-                        for keys, g in groups:
-                            if plotted >= MAX_SERIES:
-                                break
-                            if reducer == "count":
-                                g2 = g.groupby(x_col, dropna=False)[y_col].count().reset_index()
-                            else:
-                                g2 = g.groupby(x_col, dropna=False)[y_col].apply(reducer).reset_index()
-                            label = keys if isinstance(keys, (tuple, list)) else (keys,)
-                            ax.plot(
-                                g2[x_col], g2[y_col],
-                                marker=style.get("marker", ""),
-                                linestyle=style.get("line", "-"),
-                                alpha=float(style.get("alpha", 1.0)),
-                                label=str(label),
-                            )
-                            plotted += 1
-                        plugin._debug(f"grouped (discrete/bin) series plotted={plotted}", msg_id)
-
-                if legend_on:
-                    ax.legend()
-
-            ax.set_xlabel(x_col)
-            ax.set_ylabel(y_col)
-
-        elif kind == "profile":
-            y_axis = y_col or "PRES"
-            if not (_exists(x_col) and _exists(y_axis)):
-                raise PluginError("COLUMN_UNKNOWN", "profile plot requires existing x and y (default PRES)")
-            ax.plot(
-                df[x_col], df[y_axis],
-                marker=style.get("marker", "."),
-                linestyle=style.get("line", "-"),
-                alpha=float(style.get("alpha", 1.0)),
-            )
-            ax.set_xlabel(x_col)
-            ax.set_ylabel(y_axis)
-            if style.get("invert_y", True):
-                ax.invert_yaxis()
-
-        elif kind == "map":
-            lon_col, lat_col, value_col = plugin._resolve_map_columns(df, message, None)
-            if lon_col not in df.columns or lat_col not in df.columns:
-                raise PluginError("PLOT_FAIL", "map plot requires longitude and latitude columns")
-
-            cmap = style.get("cmap", "viridis")
-
-            # NEW: accept bins/agg exactly like _handle_plot()
-            bins_param = message.get("bins") or style.get("bins") or {}
-            agg_param  = message.get("agg")  or (bins_param.get("agg") if isinstance(bins_param, dict) else None)
-
-            # breadcrumbs
-            plugin._debug(
-                f"map: rows={len(df)} z={value_col!r} bins={bins_param!r} agg={agg_param!r}",
-                msg_id,
-            )
-
-            def _valid_bins(b):
-                try:
-                    return (
-                        isinstance(b, dict)
-                        and float(b.get("lon", 0.0)) > 0.0
-                        and float(b.get("lat", 0.0)) > 0.0
-                    )
-                except Exception:
-                    return False
-
-            use_grid = _valid_bins(bins_param) and bool(value_col)
-            grid = plugin._build_map_grid(df, lon_col, lat_col, value_col, bins_param, agg_param) if use_grid else None
-
-            if use_grid and grid is not None:
-                lon_grid, lat_grid, value_grid = grid
-                plugin._debug(f"map: gridded shape={value_grid.shape}", msg_id)
-                pcm = ax.pcolormesh(lon_grid, lat_grid, value_grid, shading="auto", cmap=cmap)
-                cbar = fig.colorbar(pcm, ax=ax)
-                if value_col:
-                    cbar.set_label(value_col)
-            else:
-                reason = "no/invalid bins" if not use_grid else "grid=None"
-                plugin._debug(f"map: fallback scatter ({reason})", msg_id)
-
-                color_values = df[value_col] if value_col and value_col in df.columns else None
-                sc = ax.scatter(
-                    df[lon_col], df[lat_col],
-                    c=color_values,
-                    cmap=cmap if color_values is not None else None,
-                    s=float(style.get("pointSize") or message.get("pointSize") or 36),
-                    alpha=style.get("alpha", 0.75),
-                    edgecolors=style.get("edgecolor", "none"),
-                    marker=style.get("marker", "o"),
-                )
-                if color_values is not None:
-                    cbar = fig.colorbar(sc, ax=ax)
-                    cbar.set_label(value_col)
-
-            ax.set_xlabel(lon_col)
-            ax.set_ylabel(lat_col)
-            if style.get("grid"):
-                ax.set_aspect("equal", adjustable="datalim")
-        else:
-            raise PluginError("PLOT_FAIL", f"Unsupported plot kind '{kind}'")
-
-        if style.get("title"):
-            ax.set_title(style["title"])
-        if kind != "map" and style.get("grid"):
-            ax.grid(True)
-        if kind == "map" and style.get("grid"):
-            ax.grid(True, linestyle=style.get("grid_linestyle", "--"), alpha=style.get("grid_alpha", 0.3))
-
-        buf = io.BytesIO()
-        fig.savefig(buf, format="png", dpi=dpi, bbox_inches="tight")
-        png_bytes = buf.getvalue()
-    finally:
-        plt.close(fig)
-
-    sig = png_bytes[:8]
-    if sig != b"\x89PNG\r\n\x1a\n":
-        plugin._debug(f"png signature mismatch: {sig!r}", msg_id)
-    else:
-        plugin._debug(f"png size={len(png_bytes)} head={sig!r}", msg_id)
-    return png_bytes
+    return plugin._render_plot(message, message.get("msgId"))
 
 def _compute_export_bytes(plugin: OdbArgoViewPlugin, message: Dict[str, Any]) -> Tuple[str, bytes, str]:
     dataset_key = message.get("datasetKey")

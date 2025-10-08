@@ -12,23 +12,33 @@
 <h1 id="install-and-use-odbargo-cli">Install and Use odbargo-cli</h1>
 <h2 id="introduction">Introduction</h2>
 <p><code>odbargo-cli</code> is a lightweight command-line tool designed to download Biogeochemical (BGC) Argo float data (NetCDF) from the <a href="https://erddap.ifremer.fr/erddap/index.html">ERDDAP</a> server.
-It is developed by <a href="https://www.odb.ntu.edu.tw/">ODB</a> as a Argo plugin in ODB <a href="https://api.odb.ntu.edu.tw/hub/">Ocean APIverse</a>, and also supports standalone interactive use.  Visit it for more <a href="https://api.odb.ntu.edu.tw/hub/?help=Argo">details</a> about the integration with Ocean APIverse . </p>
+It is developed by <a href="https://www.odb.ntu.edu.tw/" target="_blank">ODB</a> as a Argo plugin in ODB <a href="https://api.odb.ntu.edu.tw/hub/" target="_blank">Ocean APIverse</a>, and also supports standalone interactive use.  Visit it for more <a href="https://api.odb.ntu.edu.tw/hub/?help=Argo">details</a> about the integration with Ocean APIverse . </p>
+<p>We also provide a <strong>new optional viewer module</strong> (<code>odbargo-view</code>) that lets you preview, filter, plot, and export data directly from the CLI using <code>/view ...</code> commands. The viewer is <strong>not</strong> shipped as an executable to keep downloads small; install it from the source archive when needed (see <strong>Add the viewer</strong> below). Full usage is documented in <a href="https://github.com/cywhale/argo/blob/main/README_odbargo-view.md" target="_blank">README_odbargo-view</a>.</p>
 <hr>
 <h2 id="usage">Usage</h2>
 <h3 id="1-download">1. Download</h3>
 <p>You can either:</p>
 <ul>
-<li><strong>Download the source</strong>: <a href="https://raw.githubusercontent.com/cywhale/argo/refs/heads/main/odbargo-cli.py"><code>odbargo-cli.py</code></a></li>
 <li><strong>Use prebuilt binaries</strong> (if available for your platform):  <ul>
-<li>Windows: <a href="https://github.com/cywhale/argo/blob/main/dist/win_cli/odbargo-cli.exe"><code>odbargo-cli.exe</code></a></li>
-<li>Linux: <a href="https://github.com/cywhale/argo/blob/main/dist/linux_cli/odbargo-cli"><code>odbargo-cli</code></a></li>
+<li>Windows: <a href="https://github.com/cywhale/argo/blob/main/dist/win_cli/odbargo-cli.exe" target="_blank"><code>odbargo-cli.exe</code></a></li>
+<li>Linux: <a href="https://github.com/cywhale/argo/blob/main/dist/linux_cli/odbargo-cli" target="_blank"><code>odbargo-cli</code></a></li>
 </ul>
+</li>
+<li><p><strong>Add the viewer</strong> (from source archive):</p>
+<ul>
+<li>Find a full source archive:<ol>
+<li><a href="https://github.com/cywhale/argo/tree/main/dist" target="_blank">odbargo-0.x.y.tar.gz</a></li>
+<li><code>pip install odbargo-0.x.y.tar.gz</code></li>
+</ol>
 </li>
 </ul>
 <h3 id="2-run-the-cli">2. Run the CLI</h3>
 <p>You can run it as a background websocket server + interactive prompt:
 <em>--port is optional, default port is 8765</em></p>
-<pre><code class="lang-bash">python odbargo-cli<span class="hljs-selector-class">.py</span> --port <span class="hljs-number">8765</span>
+<pre><code class="lang-bash"><span>odbargo-cli</span><br/>
+<span># if you git clone the whole repo, you can run it from project root by:</span>
+<span># python cli_entry.py</span>
+<span># python view_entry.py # for viewer</span>
 </code></pre>
 <p>Or, if using a compiled binary:</p>
 <pre><code class="lang-bash">./odbargo-<span class="hljs-keyword">cli</span>.exe --port <span class="hljs-number">8765</span>    <span class="hljs-meta"># Windows. If Window Defender block it, click 【More info】>【Run anyway】</span>
@@ -37,7 +47,7 @@ It is developed by <a href="https://www.odb.ntu.edu.tw/">ODB</a> as a Argo plugi
 <p>You will see:</p>
 <pre><code>[Argo-<span class="hljs-keyword">CLI</span>] WebSocket listening <span class="hljs-keyword">on</span> ws:<span class="hljs-comment">//localhost:8765</span>
 🟡 <span class="hljs-keyword">CLI</span> interactive mode. <span class="hljs-keyword">Type</span> WMO <span class="hljs-keyword">list</span> (comma separated) or '<span class="hljs-keyword">exit</span>':
-&gt;&gt;&gt;
+argo&gt;
 </code></pre><hr>
 <h3 id="3-options">3. Options</h3>
 <ul>
@@ -54,8 +64,8 @@ Type WMO float numbers like:</p>
 <li>It&#39;s recommended to fetch ≤ 3 WMOs at a time on slow connections.</li>
 </ul>
 <h4 id="frontend-connected-mode">Frontend-connected mode</h4>
-<p>  If the <a href="https://api.odb.ntu.edu.tw/hub/settings">Ocean APIverse</a> &gt; Options &gt; Plugin &gt; Enable OdbArgo detects this tool running locally, it will communicate via <code>ws://localhost:8765</code> to trigger downloads directly.</p>
-<p>  Use ODB <a href="https://api.odb.ntu.edu.tw/hub/earth/settings?ogcurl=https://ecodata.odb.ntu.edu.tw/geoserver/odbargo/wms&amp;service=WMS&amp;layer=argofloats">Argofloats WMS layer</a> directly on Ocean APIverse.</p>
+<p>  If the <a href="https://api.odb.ntu.edu.tw/hub/settings" target="_blank">Ocean APIverse</a> &gt; Options &gt; Plugin &gt; Enable OdbArgo detects this tool running locally, it will communicate via <code>ws://localhost:8765</code> to trigger downloads directly.</p>
+<p>  Use ODB <a href="https://api.odb.ntu.edu.tw/hub/earth/settings?ogcurl=https://ecodata.odb.ntu.edu.tw/geoserver/odbargo/wms&amp;service=WMS&amp;layer=argofloats" target="_blank">Argofloats WMS layer</a> directly on Ocean APIverse.</p>
 </div>
 </body>
 </html>

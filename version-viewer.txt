@@ -15,9 +15,9 @@ VSVersionInfo(
       StringTable('040904B0', [
         StringStruct('CompanyName', 'Ocean Data Bank (ODB), Taiwan'),
         StringStruct('FileDescription', 'ODB Argo Ocean Data Viewer'),
-        StringStruct('FileVersion', '0.2.5.0'),
+        StringStruct('FileVersion', '0.2.6.0'),
         StringStruct('ProductName', 'ODB Argo Viewer'),
-        StringStruct('ProductVersion', '0.2.5.0')])
+        StringStruct('ProductVersion', '0.2.6.0')])
     ]),
     VarFileInfo([VarStruct('Translation', [1033, 1200])])
   ]

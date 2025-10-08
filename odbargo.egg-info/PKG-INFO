@@ -1,6 +1,6 @@
 Metadata-Version: 2.4
 Name: odbargo
-Version: 0.2.5
+Version: 0.2.6
 Summary: ODBArgo CLI + viewer (single distribution)
 Requires-Python: >=3.10
 Description-Content-Type: text/markdown
@@ -21,18 +21,35 @@ Requires-Dist: pandas>=2.1; extra == "view"
 `odbargo-cli` is a lightweight command-line tool designed to download Biogeochemical (BGC) Argo float data (NetCDF) from the [ERDDAP](https://erddap.ifremer.fr/erddap/index.html) server.
 It is developed by [ODB](https://www.odb.ntu.edu.tw/) as a Argo plugin in ODB [Ocean APIverse](https://api.odb.ntu.edu.tw/hub/), and also supports standalone interactive use.  Visit it for more [details](https://api.odb.ntu.edu.tw/hub/?help=Argo) about the integration with Ocean APIverse . 
 
+We also provide a **new optional viewer module** (`odbargo-view`) that lets you preview, filter, plot, and export data directly from the CLI using `/view ...` commands. The viewer is **not** shipped as an executable to keep downloads small; install it from the source archive when needed (see **Add the viewer** below). Full usage is documented in [README_odbargo-view](https://github.com/cywhale/argo/blob/main/README_odbargo-view.md).
+
+---
+
+## Contents
+
+- `odbargo-cli` — the downloader + single-port WS bridge.
+- `odbargo-view` — the viewer plugin (deps: xarray/matplotlib/h5netcdf/h5py; optional pandas).
+
+The CLI can run standalone; the viewer is started on demand when you use `/view …`.
+
 ---
 
 ## Usage
 
 ### 1. Download
 
-You can either:
+We publish **only** the small CLI binaries:
 
-- **Download the source**: [`odbargo-cli.py`](https://raw.githubusercontent.com/cywhale/argo/refs/heads/main/odbargo-cli.py)
 - **Use prebuilt binaries** (if available for your platform):  
   - Windows: [`odbargo-cli.exe`](https://github.com/cywhale/argo/blob/main/dist/win_cli/odbargo-cli.exe)
   - Linux: [`odbargo-cli`](https://github.com/cywhale/argo/blob/main/dist/linux_cli/odbargo-cli)
+
+- **Add the viewer** (from source archive):
+  - Find a full source archive: [odbargo-0.x.y.tar.gz](https://github.com/cywhale/argo/tree/main/dist)
+
+```bash
+pip install odbargo-0.2.6.tar.gz
+```
 
 ### 2. Run the CLI
 
@@ -40,22 +57,26 @@ You can run it as a background websocket server + interactive prompt:
 *--port is optional, default port is 8765*
 
 ```bash
-python odbargo-cli.py --port 8765
+odbargo-cli
+
+# if you git clone the whole repo, you can run it from project root by:
+# python cli_entry.py
+# python view_entry.py # for viewer
 ```
 
 Or, if using a compiled binary:
 
 ```bash
-./odbargo-cli.exe --port 8765    # Windows. If Window Defender block it, click 【More info】>【Run anyway】
-./odbargo-cli --port 8765        # Linux/macOS Need `sudo chmod u+x ./odbargo-cli` to make it executable in Linux.
+./odbargo-cli.exe    # Windows. If Window Defender block it, click 【More info】>【Run anyway】
+./odbargo-cli        # Linux/macOS Need `sudo chmod u+x ./odbargo-cli` to make it executable in Linux.
 ```
 
 You will see:
 
 ```
 [Argo-CLI] WebSocket listening on ws://localhost:8765
-🟡 CLI interactive mode. Type WMO list (comma separated) or 'exit':
->>>
+🟡 CLI interactive mode. Type '/view ...' commands or comma-separated WMO list. Type 'exit' to quit.
+argo>
 ```
 
 ---
@@ -66,11 +87,22 @@ You will see:
   Type WMO float numbers like:
 
   ```
-  >>> 5903377, 5903594
+  argo> 5903377, 5903594
   ```
 
   The tool will fetch and save NetCDF files into a temporary directory.
+  For example, download ok and tell you: Saved to: /tmp/argo_xxx/argo_5903377_5903594.nc
 
+  Viewer help (if you **Add the viewer** and installed it successfully):
+  ```
+  argo> /view help
+  argo> /view open /tmp/argo_xxx/argo_5903377_5903594.nc as ds1
+  argo> /view list_vars ds1
+  argo> /view preview ds1 as ds2 --cols TIME,PRES,TEMP --filter "PRES >= 25 AND PRES <= 100" --order TIME:asc --limit 500
+  ```
+  It will open the dataset and alias as `ds1`. You can furthur list the variables and preview the data.
+  See more: [README_odbargo-view](https://github.com/cywhale/argo/blob/main/README_odbargo-view.md).
+  
 #### Notes on Slow Networks
 
 * Large WMO groups cause a huge NetCDF to download which may timeout in poor network conditions.

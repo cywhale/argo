@@ -16,3 +16,4 @@ odbargo_view/plugin.py
 tests/test_plugin_client.py
 tests/test_plugin_filters.py
 tests/test_slash_commands.py
+tests/test_wmo_parser.py

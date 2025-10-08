@@ -359,12 +359,13 @@ Main CLI spawns plugin on first `view.*` command. Plugin must respond with:
 ### 6.1 `timeseries`
 
 * Inputs: `x: TIME`, `y: <var>`, optional `groupBy` (e.g., by LATITUDE:1.0 or CYCLE)
-* Style: `width,height,dpi,title,marker,line,alpha`
+* Style: `width,height,dpi,title,marker,line,alpha,cmap,legend (bool),legend_loc,legend_fontsize,pointSize`
 
 ### 6.2 `profile`
 
 * Inputs: `x: <var>`, `y: PRES` (default invert Y)
 * Style: `invert_y (default true)`, `grid`, `median/mean overlay`
+* Binning: optional `bins.y` (float, dbar) collapses each group to one X per depth bin; omit to aggregate only exact duplicate `PRES`
 
 ### 6.3 `map`
 
@@ -573,7 +574,11 @@ class Bridge:
 * `--size 900x500`（寬x高像素）/ `--dpi 120` / `--title "..."`
 * `--invert-y`（profile 預設 true，可用 `--no-invert-y` 關）
 * `--bins lon=0.5,lat=0.5`（map 聚合）
+* `--bins y=10`（profile 深度分組，10 dbar 級距；若未指定則僅合併完全相同的 PRES）
 * `--cmap plasma`（map 色階；預設 `viridis`）
+* `--point-size 24`（map scatter fallback點尺寸；預設 36）
+* `--legend` / `--legend-loc lower left` / `--legend-fontsize small`（ timeseries/profile 圖例控制）
+* `--group-by PRES:25` / `--agg mean`（時序/剖面分組與聚合）
 * `--out <file>`（plot/export 將二進位直接存檔；若不指定，CLI 以人類訊息回覆並提示以 WS/平台收取二進位）
 * `--echo-json`（額外輸出對等的 WS 請求 JSON，便於除錯/教學）
 

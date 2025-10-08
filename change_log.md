@@ -63,6 +63,10 @@
 #### ver 0.2.5 Breaking completely deprecate old FastAPI structure and CLI packages        
         -- ensure_viewer(), and self‑registration stabilized; robust binary forwarding
         -- one-file pyinstaller packaging (.spec) and pip install (.toml), renew linux_cli and win_cli executive
-#### ver 0.2.6 Fix plugin.view command throught websocket and improve plot functions
+#### ver 0.2.6 Fix plugin.view command through websocket and improve plot functions in specs/v0.2.1
         -- align map plotting across WS/stdio so `--bins`/`agg` actually trigger gridded `pcolormesh` (robust binning; scatter fallback remains with larger markers and debug breadcrumbs)
-
+        -- share a single plotting core between CLI and plugin; spec v0.2.1 documents `cmap`, `pointSize`, and legend styling controls
+        -- extend slash parser with `--legend`, `--legend-loc`, `--legend-fontsize`, `--point-size`, and comma-split `--group-by`; sequential colormaps now cycle distinct hues
+        -- auto-scaled legend spacing for top/bottom placement, improved TIME tick formatting (day/month/year) with pandas/matplotlib, and palette cycling fully honoring `--cmap` for profile/timeseries
+        -- add `--bins y=<ΔP>` for profile plots to aggregate depths by explicit dbar bins across CLI/WS (no implicit snapping)
+        -- make `/view close` return promptly by offloading heavy netCDF closes to a background thread
