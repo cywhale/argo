@@ -77,7 +77,7 @@ argo>
   argo> /view preview ds1 as ds2 --cols TIME,PRES,TEMP --filter "PRES >= 25 AND PRES <= 100" --order TIME:asc --limit 500
   ```
   
-  即可開啟資料集 (`ds1`)、檢視變數與預覽子集，詳細操作請參考 [README_odbargo-view](https://github.com/cywhale/argo/blob/main/README_odbargo-view.md)。
+  即可開啟資料集 (`ds1`)、檢視變數與預覽子集，詳細操作請參考 [README_odbargo-view](https://github.com/cywhale/argo/blob/main/README_odbargo-view_tw.md)。
 
 #### 網路緩慢時的建議
 
