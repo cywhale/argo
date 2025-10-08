@@ -11,7 +11,7 @@
 
 ## 安裝
 
-可從主專案的原始壓縮檔安裝（詳見 [README: odbargo-cli](https://github.com/cywhale/argo/blob/main/README.md)）：
+可從主專案的原始壓縮檔安裝（詳見 [README: odbargo-cli](https://github.com/cywhale/argo/blob/main/README_tw.md)）：
 
 ```bash
 pip install odbargo-0.x.y.tar.gz
