@@ -3,7 +3,7 @@
 ## 簡介
 `odbargo-cli` 是一款輕量級命令列工具，可從 [ERDDAP](https://erddap.ifremer.fr/erddap/index.html) 伺服器下載生地化 (BGC) Argo 浮標 NetCDF 資料。由 [ODB](https://www.odb.ntu.edu.tw/) 開發，可在 [Ocean APIverse](https://api.odb.ntu.edu.tw/hub/) 平台整合使用，也能獨立運作。整合流程請參考[說明頁](https://api.odb.ntu.edu.tw/hub/?help=Argo)。
 
-我們另外提供 **資料檢視模組** `odbargo-view`，可直接在 CLI 透過 `/view ...` 指令預覽、篩選、繪圖與匯出資料。為了保持主程式精簡，檢視模組需另行安裝（詳見「安裝 viewer」段落）。完整操作可參考 [README_odbargo-view](https://github.com/cywhale/argo/blob/main/README_odbargo-view.md)。
+我們另外提供 **資料檢視模組** `odbargo-view`，可直接在 CLI 透過 `/view ...` 指令預覽、篩選、繪圖與匯出資料。為了保持主程式精簡，檢視模組需另行安裝（詳見「安裝 viewer」段落）。完整操作可參考 [README_odbargo-view](https://github.com/cywhale/argo/blob/main/README_odbargo-view_tw.md)。
 
 ---
 
