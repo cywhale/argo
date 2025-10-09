@@ -151,6 +151,7 @@ argo> /view plot ds1 timeseries --x TIME --y TEMP --out temp.png
 * **Viewer 沒啟動？** 確認已安裝 sdist，可設 `ODBARGO_DEBUG=1` 觀察啟動過程交握訊息。
 * **PNG 沒開啟？** 用 `--out plot.png` 儲存後自行開啟；CLI 仍會寫出原始位元組。
 * **首次啟動較慢？** 初次載入套件會花時間，之後會快很多。若需要調整等待時間，可修改 `ODBARGO_VIEW_STARTUP_TIMEOUT`。
+* **變數大小寫問題** 詳見 [README: odbargo-cli](https://github.com/cywhale/argo/blob/main/README_tw.md)，預設不分大小寫。
 
 ---
 

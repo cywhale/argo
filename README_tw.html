@@ -59,6 +59,9 @@ argo&gt;
 <li>CLI 工具會自動重試最多 3 次，每次間隔 10 秒。</li>
 <li>建議一次查詢不超過 3 個 WMO 編號以提高成功率。</li>
 </ul>
+<h4 id="-">變數名稱大小寫</h4>
+<p>CLI 預設啟用「大小寫不敏感」模式（<code>--case-insensitive-vars</code> 或 <code>ODBARGO_CASE_INSENSITIVE_VARS=0|1</code>）。<br>
+因此 <code>--x TEMP</code> 與 <code>--x temp</code> 的效果相同，可同時支援舊版（透過argopy下載，變數大寫）與新版 ERDDAP（變數小寫）NetCDF。若需嚴格依原始大小寫，可使用 <code>--no-case-insensitive-vars</code> 或將環境變數設為 <code>0</code>。</p>
 <h4 id="-">前端連線模式</h4>
 <p>若您啟用 <a href="https://api.odb.ntu.edu.tw/hub/settings" target="_blank">Ocean APIverse</a> &gt; 選項 &gt; 擴充模組 &gt; 啟用 OdbArgo，此工具會與前端透過 <code>ws://localhost:8765</code> 溝通並自動觸發下載任務。</p>
 <p>也可直接連結 ODB APIverse 提供的 <a href="https://api.odb.ntu.edu.tw/hub/earth/settings?ogcurl=https://ecodata.odb.ntu.edu.tw/geoserver/odbargo/wms&amp;service=WMS&amp;layer=argofloats" target="_blank">Argofloats WMS 圖層</a></p>

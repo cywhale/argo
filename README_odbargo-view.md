@@ -151,6 +151,7 @@ Example (profile with depth bins and discrete groups):
 * **Viewer didn’t start?** Ensure you installed the sdist and try again; or set `ODBARGO_DEBUG=1` to see handshake logs.
 * **PNG didn’t open?** Add `--out plot.png` and open it manually; the CLI always writes the raw bytes.
 * **Slow on first use?** Heavy libs are imported the first time; later commands are faster. On first plot the imports may be slow; that’s normal. Adjust `ODBARGO_VIEW_STARTUP_TIMEOUT` if needed.
+* **Variable name is case-insensitive**: as mentioned in [README: odbargo-cli](https://github.com/cywhale/argo/blob/main/README.md)
 
 ---
 

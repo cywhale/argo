@@ -26,7 +26,7 @@ CLI 可以獨立使用；需要視覺化時再啟動 viewer。
 - **安裝 全部（含  viewer 原始套件）**：自 [dist](https://github.com/cywhale/argo/tree/main/dist) 下載 `odbargo-0.x.y.tar.gz`
 
 ```bash
-pip install odbargo-0.2.6.tar.gz
+pip install odbargo-0.x.y.tar.gz
 ```
 
 ### 2. 執行 CLI
@@ -84,6 +84,13 @@ argo>
 * 大量 WMO 編號會產生巨大的 NetCDF 檔，易因網速慢而下載失敗。
 * CLI 工具會自動重試最多 3 次，每次間隔 10 秒。
 * 建議一次查詢不超過 3 個 WMO 編號以提高成功率。
+
+#### 變數名稱大小寫
+
+CLI 預設啟用「大小寫不敏感」模式（`--case-insensitive-vars` 或環境變數
+`ODBARGO_CASE_INSENSITIVE_VARS=0|1`），因此 `--x TEMP` 與 `--x temp` 的效果相同，
+可同時適用舊版（透過argopy下載，變數大寫）與新版 ERDDAP（變數小寫）NetCDF。
+若需要嚴格依照原始大小寫，可使用 `--no-case-insensitive-vars` 或設定環境變數為 `0`。
 
 #### 前端連線模式
 

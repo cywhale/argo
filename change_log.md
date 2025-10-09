@@ -70,3 +70,8 @@
         -- auto-scaled legend spacing for top/bottom placement, improved TIME tick formatting (day/month/year) with pandas/matplotlib, and palette cycling fully honoring `--cmap` for profile/timeseries
         -- add `--bins y=<ΔP>` for profile plots to aggregate depths by explicit dbar bins across CLI/WS (no implicit snapping)
         -- make `/view close` return promptly by offloading heavy netCDF closes to a background thread
+#### ver 0.2.7 Case-insensitive view operations across CLI/WebSocket
+        -- add `--case-insensitive-vars` flag (default on) and auto-normalise maps/timeseries for lower-case ERDDAP datasets
+        -- ensure viewer lazily normalises already-open datasets, reuses column resolver for groupBy/map axes, and propagates filters under case-insensitive mode
+        -- extend CLI slash handling to surface plugin error payloads and forward explicit case flags to WS-registered viewers
+        -- update docs (README.md/html + Traditional Chinese) and specs/odbargo_view_spec_v_0_2_1.md; add tests for legacy → lowercase conversion, JSON between filters, map/timeseries plots, and CSV export

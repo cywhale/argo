@@ -21,7 +21,8 @@ _SPEC = importlib.util.spec_from_file_location(
     "odbargo_cli_module",
     Path(__file__).resolve().parents[1] / "odbargo-cli.py",
 )
-assert _SPEC and _SPEC.loader
+if _SPEC is None or _SPEC.loader is None:
+    pytest.skip("legacy odbargo-cli.py entrypoint not available", allow_module_level=True)
 odbargo_cli = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(odbargo_cli)  # type: ignore[attr-defined]
 

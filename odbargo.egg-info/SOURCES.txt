@@ -13,6 +13,7 @@ odbargo.egg-info/top_level.txt
 odbargo_view/__init__.py
 odbargo_view/__main__.py
 odbargo_view/plugin.py
+tests/test_case_insensitive.py
 tests/test_plugin_client.py
 tests/test_plugin_filters.py
 tests/test_slash_commands.py

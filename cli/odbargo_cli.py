@@ -9,6 +9,7 @@ Implements:
 from __future__ import annotations
 
 import argparse
+import copy
 import asyncio
 import json
 import math
@@ -558,7 +559,14 @@ class _LocalClientSink:
             pass
 
 class ArgoCLIApp:
-    def __init__(self, port: int, insecure: bool, plugin_mode: str, plugin_binary: Optional[str]) -> None:
+    def __init__(
+        self,
+        port: int,
+        insecure: bool,
+        plugin_mode: str,
+        plugin_binary: Optional[str],
+        case_insensitive_vars: bool,
+    ) -> None:
         self.port = port
         self.insecure = insecure
         self.plugin = PluginClient(mode=plugin_mode, binary_override=plugin_binary)
@@ -570,6 +578,7 @@ class ArgoCLIApp:
         self._readline = readline if 'readline' in globals() else None
         self._interactive = False
         self._background_tasks: Set[asyncio.Task[Any]] = set()
+        self.case_insensitive_vars = case_insensitive_vars
         # --- WS plugin self-registration state ---
         self._plugin_ws: Optional[websockets.WebSocketServerProtocol] = None
         self._plugin_caps: Dict[str, Any] = {}
@@ -956,6 +965,9 @@ class ArgoCLIApp:
             payload = {k: v for k, v in data.items() if k not in {"type", "requestId"}}
             payload.update({"op": op, "msgId": request_id})
 
+            if payload.get("caseInsensitive") is None:
+                payload["caseInsensitive"] = self.case_insensitive_vars
+
             # remember who should get the responses (and whether to expect binary)
             kind = "plot" if t == "view.plot" else ("export" if t == "view.export" else "simple")
             self._plugin_pending[request_id] = {"client_ws": websocket, "kind": kind, "expect_binary": False}
@@ -979,6 +991,7 @@ class ArgoCLIApp:
                     "path": data.get("path"),
                     "datasetKey": dataset_key,
                     "enginePreference": data.get("enginePreference"),
+                    "caseInsensitive": data.get("caseInsensitive"),
                 })
                 self._last_dataset_key = dataset_key
                 payload = {
@@ -1158,12 +1171,75 @@ class ArgoCLIApp:
         except Exception as exc:
             print(f"❌ {exc}")
 
+    def _normalise_case_payload(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        if not self.case_insensitive_vars:
+            return payload
+        data = copy.deepcopy(payload)
+
+        for key in ("x", "y", "z"):
+            value = data.get(key)
+            if isinstance(value, str):
+                data[key] = value.lower()
+
+        cols = data.get("columns")
+        if isinstance(cols, list):
+            data["columns"] = [col.lower() if isinstance(col, str) else col for col in cols]
+
+        group_by = data.get("groupBy")
+        if isinstance(group_by, list):
+            normalised: List[str] = []
+            for item in group_by:
+                if not isinstance(item, str):
+                    continue
+                if ":" in item:
+                    base, rest = item.split(":", 1)
+                    normalised.append(f"{base.lower()}:{rest}")
+                else:
+                    normalised.append(item.lower())
+            data["groupBy"] = normalised
+
+        order_by = data.get("orderBy")
+        if isinstance(order_by, list):
+            normalised_order: List[Dict[str, Any]] = []
+            for entry in order_by:
+                if not isinstance(entry, dict):
+                    continue
+                entry_copy = dict(entry)
+                col_name = entry_copy.get("col")
+                if isinstance(col_name, str):
+                    entry_copy["col"] = col_name.lower()
+                normalised_order.append(entry_copy)
+            data["orderBy"] = normalised_order
+
+        bins = data.get("bins")
+        if isinstance(bins, dict):
+            transformed: Dict[str, Any] = {}
+            for key, value in bins.items():
+                transformed[str(key).lower()] = value
+            data["bins"] = transformed
+
+        return data
+
+    def _handle_error_response(self, messages: List[Dict[str, Any]], request_id: Optional[str]) -> Optional[int]:
+        if not request_id:
+            return None
+        err = next((m for m in messages if m.get("type") == "error" and m.get("requestId") == request_id), None)
+        if not err:
+            return None
+        handle_cli_plugin_error({
+            "code": err.get("code", "PLUGIN_ERROR"),
+            "message": err.get("message", "Plugin error"),
+            "hint": err.get("hint"),
+        })
+        return exit_code_for_error(err.get("code"))
+
     async def invoke_view_request_from_cli(
         self,
         data: dict,
         *,
         want_binary: bool = False,
         timeout: float = 30.0,
+        force_stdio: bool = False,
     ) -> tuple[list[dict], bytes | None]:
         """
         Run a view.* request through the normal WS-dispatch pipeline, but keep I/O in-process.
@@ -1174,10 +1250,18 @@ class ArgoCLIApp:
 
         sink = _LocalClientSink(request_id, expect_binary=want_binary)
 
+        saved_ws = self._plugin_ws if force_stdio else None
+        if force_stdio:
+            self._plugin_ws = None
+
         # This reuses _handle_view_request(), which already knows how to:
         #   - use the WS-registered plugin if available (in your newer build), OR
         #   - fall back to stdio PluginClient
-        await self._handle_view_request(sink, data)
+        try:
+            await self._handle_view_request(sink, data)
+        finally:
+            if force_stdio:
+                self._plugin_ws = saved_ws
 
         await sink.wait_done(timeout=timeout)
 
@@ -1208,7 +1292,12 @@ class ArgoCLIApp:
             if parsed.request_type == "view.open_dataset":
                 req = dict(parsed.request_payload)
                 req["type"] = "view.open_dataset"
+                req["caseInsensitive"] = self.case_insensitive_vars
+                req = self._normalise_case_payload(req)
                 msgs, _ = await self.invoke_view_request_from_cli(req, want_binary=False)
+                error_code = self._handle_error_response(msgs, req.get("requestId"))
+                if error_code is not None:
+                    return error_code
                 # find dataset_opened
                 opened = next((m for m in msgs if m.get("type") == "view.dataset_opened"), None)
                 if not opened:
@@ -1218,8 +1307,14 @@ class ArgoCLIApp:
                 render_dataset_summary(opened.get("summary", {}))
                 return EXIT_SUCCESS
             if parsed.request_type == "view.list_vars":
-                req = dict(parsed.request_payload); req["type"] = "view.list_vars"
+                req = dict(parsed.request_payload)
+                req["type"] = "view.list_vars"
+                req["caseInsensitive"] = self.case_insensitive_vars
+                req = self._normalise_case_payload(req)
                 msgs, _ = await self.invoke_view_request_from_cli(req, want_binary=False)
+                error_code = self._handle_error_response(msgs, req.get("requestId"))
+                if error_code is not None:
+                    return error_code
                 listing = next((m for m in msgs if m.get("type") == "view.vars"), None)
                 if not listing:
                     print("⚠️  No response from viewer")
@@ -1240,13 +1335,19 @@ class ArgoCLIApp:
                 render_view_help(parsed.request_payload.get("topic"))
                 return EXIT_SUCCESS
             if parsed.request_type == "view.preview":
-                req = dict(parsed.request_payload); req["type"] = "view.preview"
+                req = dict(parsed.request_payload)
+                req["type"] = "view.preview"
                 if parsed.request_payload.get("limit") is not None:
                     req["limit"] = int(parsed.request_payload["limit"])  
                 if parsed.request_payload.get("trimDimensions"):
                     req["trim-dims"] = True
+                req["caseInsensitive"] = self.case_insensitive_vars
+                req = self._normalise_case_payload(req)
 
                 msgs, _ = await self.invoke_view_request_from_cli(req, want_binary=False)
+                error_code = self._handle_error_response(msgs, req.get("requestId"))
+                if error_code is not None:
+                    return error_code
                 result = next((m for m in msgs if m.get("type") == "view.preview_result"), None)
                 if not result:
                     print("⚠️  No response from viewer")
@@ -1256,8 +1357,14 @@ class ArgoCLIApp:
                 self._last_dataset_key = subset_key or parsed.request_payload.get("datasetKey")
                 return EXIT_SUCCESS
             if parsed.request_type == "view.close_dataset":
-                req = dict(parsed.request_payload); req["type"] = "view.close_dataset"
+                req = dict(parsed.request_payload)
+                req["type"] = "view.close_dataset"
+                req["caseInsensitive"] = self.case_insensitive_vars
+                req = self._normalise_case_payload(req)
                 msgs, _ = await self.invoke_view_request_from_cli(req, want_binary=False)
+                error_code = self._handle_error_response(msgs, req.get("requestId"))
+                if error_code is not None:
+                    return error_code
                 closed = next((m for m in msgs if m.get("type") == "view.dataset_closed"), None)
                 if self._last_dataset_key == parsed.request_payload.get("datasetKey"):
                     self._last_dataset_key = None
@@ -1297,6 +1404,9 @@ class ArgoCLIApp:
                     parsed.out_path.parent.mkdir(parents=True, exist_ok=True)
                 else:
                     print("🖼️  Plot will open in a window (use --out to save instead).")
+
+                req["caseInsensitive"] = self.case_insensitive_vars
+                req = self._normalise_case_payload(req)
 
                 msgs, png = await self.invoke_view_request_from_cli(req, want_binary=True)
 
@@ -1339,6 +1449,8 @@ class ArgoCLIApp:
                 req["type"] = "view.export"
                 if parsed.request_payload.get("limit") is not None:
                     req["limit"] = int(parsed.request_payload["limit"])                
+                req["caseInsensitive"] = self.case_insensitive_vars
+                req = self._normalise_case_payload(req)
 
                 # Accumulate all binary frames until file_end
                 msgs, data = await self.invoke_view_request_from_cli(req, want_binary=True)
@@ -1544,9 +1656,9 @@ def display_plot_window(png_bytes: bytes, loop: Optional[asyncio.AbstractEventLo
     except Exception:
         opened = False
 
-    if opened:
-        print(f"🖼️  Opened with system viewer → {temp_path}")
-        return
+        if opened:
+            print(f"🖼️  Opened with system viewer → {temp_path}")
+            return
 
     # 3) Fallback: try default browser
     try:
@@ -1603,6 +1715,15 @@ def main() -> None:
     parser.add_argument("command", nargs="*", help="Optional slash command(s) to run")
     parser.add_argument("--port", type=int, default=8765, help="Port to serve WebSocket")
     parser.add_argument("--insecure", action="store_true", help="Disable SSL verification for downloads")
+    env_case = os.environ.get("ODBARGO_CASE_INSENSITIVE_VARS")
+    default_case = True if env_case is None else str(env_case).lower() not in {"0", "false", "no", "off"}
+    parser.add_argument(
+        "--case-insensitive-vars",
+        dest="case_insensitive_vars",
+        action=argparse.BooleanOptionalAction,
+        default=default_case,
+        help="Treat variable names case-insensitively (default: %(default)s)",
+    )
     parser.add_argument(
         "--plugin",
         choices=["auto", "view", "none"],
@@ -1620,7 +1741,7 @@ def main() -> None:
         raw = " ".join(args.command)
         commands = split_commands(raw)
 
-    app = ArgoCLIApp(args.port, args.insecure, args.plugin, args.plugin_binary)
+    app = ArgoCLIApp(args.port, args.insecure, args.plugin, args.plugin_binary, args.case_insensitive_vars)
 
     async def runner() -> int:
         if commands:

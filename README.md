@@ -33,7 +33,7 @@ We publish **only** the small CLI binaries:
   - Find a full source archive: [odbargo-0.x.y.tar.gz](https://github.com/cywhale/argo/tree/main/dist)
 
 ```bash
-pip install odbargo-0.2.6.tar.gz
+pip install odbargo-0.x.y.tar.gz
 ```
 
 ### 2. Run the CLI
@@ -94,9 +94,15 @@ argo>
 * The CLI retries **3 times with 10-second intervals** if a download fails.
 * It's recommended to fetch ≤ 3 WMOs at a time on slow connections.
 
+#### Case-insensitive variables
+
+`odbargo-cli` treats variable names case-insensitively by default (flag
+`--case-insensitive-vars`, or `ODBARGO_CASE_INSENSITIVE_VARS=0|1`). This keeps
+commands compatible with both legacy upper-case NetCDF files and the newer
+lower-case ERDDAP exports. Set the flag to `False` only if you need strict,
+case-sensitive matching, use `--no-case-insensitive-vars` or `ODBARGO_CASE_INSENSITIVE_VARS=0`.
+
 #### Frontend-connected mode
   If the [Ocean APIverse](https://api.odb.ntu.edu.tw/hub/settings) > Options > Plugin > Enable OdbArgo detects this tool running locally, it will communicate via `ws://localhost:8765` to trigger downloads directly.
 
   Use ODB [Argofloats WMS layer](https://api.odb.ntu.edu.tw/hub/earth/settings?ogcurl=https://ecodata.odb.ntu.edu.tw/geoserver/odbargo/wms&service=WMS&layer=argofloats) directly on Ocean APIverse.
-
-

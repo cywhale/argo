@@ -70,8 +70,16 @@ class DatasetStore:
     def __init__(self) -> None:
         self._datasets: Dict[str, xr.Dataset] = {}
         self._subsets: Dict[str, SubsetSpec] = {}
+        self._case_flags: Dict[str, bool] = {}
 
-    def open_dataset(self, key: str, path: str, engine_preference: Optional[List[str]] = None) -> xr.Dataset:
+    def open_dataset(
+        self,
+        key: str,
+        path: str,
+        engine_preference: Optional[List[str]] = None,
+        *,
+        case_insensitive: bool = False,
+    ) -> xr.Dataset:
         if key in self._datasets:
             self._datasets[key].close()
         engines = engine_preference or ["h5netcdf", "netcdf4"]
@@ -79,7 +87,9 @@ class DatasetStore:
         for engine in engines:
             try:
                 ds = xr.open_dataset(path, engine=engine)
+                ds = self._prepare_dataset(ds, case_insensitive)
                 self._datasets[key] = ds
+                self._case_flags[key] = case_insensitive
                 return ds
             except Exception as exc:  # pragma: no cover - engine fallback
                 last_err = exc
@@ -87,7 +97,9 @@ class DatasetStore:
         # fallback to default engine
         try:
             ds = xr.open_dataset(path)
+            ds = self._prepare_dataset(ds, case_insensitive)
             self._datasets[key] = ds
+            self._case_flags[key] = case_insensitive
             return ds
         except Exception as exc:
             raise PluginError("DATASET_OPEN_FAIL", f"Failed to open dataset at {path}", hint=str(last_err or exc)) from exc
@@ -106,6 +118,17 @@ class DatasetStore:
         if key in self._subsets:
             return self.root_key(self._subsets[key].parent_key)
         raise PluginError("DATASET_NOT_FOUND", f"Dataset '{key}' not found")
+
+    def ensure_case_insensitive(self, key: str) -> None:
+        root = self.root_key(key)
+        if self._case_flags.get(root):
+            return
+        ds = self._datasets.get(root)
+        if ds is None:
+            raise PluginError("DATASET_NOT_FOUND", f"Dataset '{root}' not found")
+        ds = self._prepare_dataset(ds, True)
+        self._datasets[root] = ds
+        self._case_flags[root] = True
 
     def resolve(self, key: str) -> Tuple[xr.Dataset, Optional[ResolvedSubset]]:
         if key in self._datasets:
@@ -134,11 +157,17 @@ class DatasetStore:
         if not filtered_filters and columns is None:
             raise PluginError("INTERNAL_ERROR", "Subset requires filters or columns")
         root = self.root_key(parent_key)
-        stored_columns = list(columns) if columns is not None else None
+        if columns is not None:
+            stored_columns = list(columns)
+            if self.is_case_insensitive(root):
+                stored_columns = [col.lower() for col in stored_columns]
+        else:
+            stored_columns = None
         self._subsets[subset_key] = SubsetSpec(parent_key=root, columns=stored_columns, filters=filtered_filters)
 
     def close(self, key: str, *, async_close: bool = False) -> None:
         ds = self._datasets.pop(key, None)
+        self._case_flags.pop(key, None)
         # remove any subsets referencing this key directly
         to_remove = [name for name, subset in self._subsets.items() if subset.parent_key == key or name == key]
         for name in to_remove:
@@ -158,6 +187,58 @@ class DatasetStore:
     def close_all(self) -> None:  # pragma: no cover - safety
         for key in list(self._datasets.keys()):
             self.close(key)
+
+    def is_case_insensitive(self, key: str) -> bool:
+        if key in self._datasets:
+            return self._case_flags.get(key, False)
+        if key in self._subsets:
+            return self.is_case_insensitive(self._subsets[key].parent_key)
+        raise PluginError("DATASET_NOT_FOUND", f"Dataset '{key}' not found")
+
+    def _prepare_dataset(self, ds: xr.Dataset, case_insensitive: bool) -> xr.Dataset:
+        if case_insensitive:
+            ds = self._lowercase_dataset(ds)
+            ds = self._ensure_default_coords(ds)
+        return ds
+
+    def _lowercase_dataset(self, ds: xr.Dataset) -> xr.Dataset:
+        dim_rename: Dict[str, str] = {}
+        for dim in ds.dims:
+            lower = dim.lower()
+            if lower != dim:
+                if lower in ds.dims and lower != dim:
+                    raise PluginError("DATASET_OPEN_FAIL", f"Cannot normalise dimension '{dim}' to '{lower}'")
+                dim_rename[dim] = lower
+        if dim_rename:
+            ds = ds.rename_dims(dim_rename)
+
+        rename_map: Dict[str, str] = {}
+        seen: Dict[str, str] = {}
+        for name in list(ds.coords.keys()) + list(ds.data_vars.keys()):
+            lower = name.lower()
+            if lower != name:
+                if lower in seen and seen[lower] != name:
+                    raise PluginError("DATASET_OPEN_FAIL", f"Multiple variables collapse to '{lower}' during case normalisation")
+                if (lower in ds.coords or lower in ds.data_vars) and lower not in rename_map.values():
+                    raise PluginError("DATASET_OPEN_FAIL", f"Variable '{name}' conflicts with existing '{lower}'")
+                rename_map[name] = lower
+                seen[lower] = name
+        if rename_map:
+            ds = ds.rename(rename_map)
+        return ds
+
+    def _ensure_default_coords(self, ds: xr.Dataset) -> xr.Dataset:
+        coord_candidates = ["longitude", "latitude", "time"]
+        if any(name in ds.coords for name in coord_candidates):
+            return ds
+        available = set(ds.data_vars.keys()) | set(ds.coords.keys())
+        missing = [name for name in coord_candidates if name not in available]
+        if missing:
+            raise PluginError("DATASET_OPEN_FAIL", f"Dataset missing required columns {missing} for coordinate fallback")
+        promote = [name for name in coord_candidates if name in ds.data_vars]
+        if promote:
+            ds = ds.set_coords(promote)
+        return ds
 
 
 Token = Tuple[str, Any]
@@ -343,7 +424,11 @@ def _infer_literal(value: Any, series: pd.Series) -> Any:
     return value
 
 
-def _evaluate_json_filter(filter_json: Dict[str, Any], df: pd.DataFrame) -> pd.Series:
+def _evaluate_json_filter(
+    filter_json: Dict[str, Any],
+    df: pd.DataFrame,
+    column_map: Optional[Dict[str, str]] = None,
+) -> pd.Series:
     if not filter_json:
         return pd.Series([True] * len(df), index=df.index)
 
@@ -362,7 +447,7 @@ def _evaluate_json_filter(filter_json: Dict[str, Any], df: pd.DataFrame) -> pd.S
             return result
         if "between" in node:
             field, low, high = node["between"]
-            series = _get_series(df, field)
+            series = _get_series(df, field, column_map)
             low = _infer_literal(low, series)
             high = _infer_literal(high, series)
             return series.between(low, high)
@@ -370,7 +455,7 @@ def _evaluate_json_filter(filter_json: Dict[str, Any], df: pd.DataFrame) -> pd.S
         for op, payload in node.items():
             if op in {">", ">=", "<", "<=", "=", "!="}:
                 field, value = payload
-                series = _get_series(df, field)
+                series = _get_series(df, field, column_map)
                 value = _infer_literal(value, series)
                 if op == ">":
                     return series > value
@@ -389,13 +474,21 @@ def _evaluate_json_filter(filter_json: Dict[str, Any], df: pd.DataFrame) -> pd.S
     return eval_node(filter_json).fillna(False)
 
 
-def _get_series(df: pd.DataFrame, field: str) -> pd.Series:
-    if field not in df.columns:
-        raise PluginError("COLUMN_UNKNOWN", f"Unknown column '{field}'")
-    return df[field]
+def _get_series(df: pd.DataFrame, field: str, column_map: Optional[Dict[str, str]] = None) -> pd.Series:
+    if field in df.columns:
+        return df[field]
+    if column_map is not None:
+        lookup = column_map.get(field.lower())
+        if lookup and lookup in df.columns:
+            return df[lookup]
+    raise PluginError("COLUMN_UNKNOWN", f"Unknown column '{field}'")
 
 
-def _evaluate_dsl_filter(dsl: str, df: pd.DataFrame) -> Tuple[pd.Series, List[str]]:
+def _evaluate_dsl_filter(
+    dsl: str,
+    df: pd.DataFrame,
+    column_map: Optional[Dict[str, str]] = None,
+) -> Tuple[pd.Series, List[str]]:
     parser = DSLParser(dsl)
     ast, identifiers = parser.parse()
 
@@ -412,12 +505,12 @@ def _evaluate_dsl_filter(dsl: str, df: pd.DataFrame) -> Tuple[pd.Series, List[st
                 left = left | eval_node(child)
             return left
         if op == "between":
-            series = _get_series(df, node["field"])
+            series = _get_series(df, node["field"], column_map)
             low = _infer_literal(node["low"], series)
             high = _infer_literal(node["high"], series)
             return series.between(low, high)
         if op == "compare":
-            series = _get_series(df, node["field"])
+            series = _get_series(df, node["field"], column_map)
             value = _infer_literal(node["value"], series)
             cmp = node["cmp"]
             if cmp == ">":
@@ -481,6 +574,104 @@ class OdbArgoViewPlugin:
         except Exception:
             pass
 
+    def _dataset_case_flag(self, dataset_key: Optional[str], message: Dict[str, Any]) -> bool:
+        requested = message.get("caseInsensitive")
+        if requested is not None:
+            flag = bool(requested)
+            if flag and dataset_key:
+                try:
+                    self.store.ensure_case_insensitive(dataset_key)
+                except PluginError:
+                    pass
+            return flag
+        if dataset_key:
+            try:
+                return self.store.is_case_insensitive(dataset_key)
+            except PluginError:
+                return False
+        return False
+
+    def _normalise_case_payload(self, message: Dict[str, Any], case_insensitive: bool) -> Dict[str, Any]:
+        if not case_insensitive:
+            return message
+        data = deepcopy(message)
+
+        for key in ("x", "y", "z"):
+            value = data.get(key)
+            if isinstance(value, str):
+                data[key] = value.lower()
+
+        if isinstance(data.get("columns"), list):
+            data["columns"] = [col.lower() if isinstance(col, str) else col for col in data["columns"]]
+
+        if isinstance(data.get("groupBy"), list):
+            normalised: List[str] = []
+            for item in data["groupBy"]:
+                if not isinstance(item, str):
+                    continue
+                if ":" in item:
+                    base, rest = item.split(":", 1)
+                    normalised.append(f"{base.lower()}:{rest}")
+                else:
+                    normalised.append(item.lower())
+            data["groupBy"] = normalised
+
+        if isinstance(data.get("orderBy"), list):
+            normalised_order: List[Dict[str, Any]] = []
+            for entry in data["orderBy"]:
+                if not isinstance(entry, dict):
+                    continue
+                entry_copy = dict(entry)
+                col_name = entry_copy.get("col")
+                if isinstance(col_name, str):
+                    entry_copy["col"] = col_name.lower()
+                normalised_order.append(entry_copy)
+            data["orderBy"] = normalised_order
+
+        bins = data.get("bins")
+        if isinstance(bins, dict):
+            transformed: Dict[str, Any] = {}
+            for key, value in bins.items():
+                transformed[str(key).lower()] = value
+            data["bins"] = transformed
+
+        style = data.get("style")
+        if isinstance(style, dict):
+            style_bins = style.get("bins")
+            if isinstance(style_bins, dict):
+                style["bins"] = {str(k).lower(): v for k, v in style_bins.items()}
+
+        filter_obj = data.get("filter")
+        if isinstance(filter_obj, dict):
+            data["filter"] = self._normalise_filter_case(filter_obj)
+
+        return data
+
+    def _normalise_filter_case(self, filter_obj: Dict[str, Any]) -> Dict[str, Any]:
+        filt = deepcopy(filter_obj)
+        json_spec = filt.get("json")
+        if json_spec:
+            filt["json"] = self._lowercase_filter_json(json_spec)
+        return filt
+
+    def _lowercase_filter_json(self, node: Any) -> Any:
+        if isinstance(node, dict):
+            if "between" in node and isinstance(node["between"], list) and node["between"]:
+                field = node["between"][0]
+                if isinstance(field, str):
+                    node["between"][0] = field.lower()
+            for key, value in list(node.items()):
+                if key in {"and", "or"} and isinstance(value, list):
+                    node[key] = [self._lowercase_filter_json(child) for child in value]
+                elif key in {">", ">=", "<", "<=", "=", "!="} and isinstance(value, list) and value:
+                    field = value[0]
+                    if isinstance(field, str):
+                        node[key][0] = field.lower()
+            return node
+        if isinstance(node, list):
+            return [self._lowercase_filter_json(item) for item in node]
+        return node
+
     def send_json(self, payload: Dict[str, Any]) -> None:
         sys.stdout.write(json.dumps(payload) + "\n")
         sys.stdout.flush()
@@ -526,9 +717,14 @@ class OdbArgoViewPlugin:
         path = message.get("path")
         dataset_key = message.get("datasetKey")
         engine_preference = message.get("enginePreference")
+        ci_flag = message.get("caseInsensitive")
+        if ci_flag is None:
+            case_insensitive = True
+        else:
+            case_insensitive = bool(ci_flag)
         if not path or not dataset_key:
             raise PluginError("DATASET_OPEN_FAIL", "Missing path or datasetKey")
-        ds = self.store.open_dataset(dataset_key, path, engine_preference)
+        ds = self.store.open_dataset(dataset_key, path, engine_preference, case_insensitive=case_insensitive)
         summary = self._build_dataset_summary(ds)
         self.send_json({
             "op": "open_dataset.ok",
@@ -580,35 +776,48 @@ class OdbArgoViewPlugin:
             "vars": summary["vars"],
         })
 
-    def _mask_from_filter_specs(self, filters: List[FilterSpec], df: pd.DataFrame) -> pd.Series:
+    def _mask_from_filter_specs(
+        self,
+        filters: List[FilterSpec],
+        df: pd.DataFrame,
+        column_map: Optional[Dict[str, str]] = None,
+    ) -> pd.Series:
         mask = pd.Series([True] * len(df), index=df.index)
         for filter_spec in filters:
             if not (filter_spec.dsl or filter_spec.json_spec):
                 continue
             if filter_spec.dsl:
-                dsl_mask, _ = _evaluate_dsl_filter(filter_spec.dsl, df)
+                dsl_mask, _ = _evaluate_dsl_filter(filter_spec.dsl, df, column_map)
                 mask = mask & dsl_mask
             if filter_spec.json_spec:
-                json_mask = _evaluate_json_filter(filter_spec.json_spec, df)
+                json_mask = _evaluate_json_filter(filter_spec.json_spec, df, column_map)
                 mask = mask & json_mask
         return mask.fillna(False)
 
-    def _parse_filter(self, message: Dict[str, Any], df: pd.DataFrame, base_filters: Optional[List[FilterSpec]] = None) -> Tuple[pd.Series, Optional[FilterSpec]]:
+    def _parse_filter(
+        self,
+        message: Dict[str, Any],
+        df: pd.DataFrame,
+        base_filters: Optional[List[FilterSpec]] = None,
+        *,
+        case_insensitive: bool = False,
+    ) -> Tuple[pd.Series, Optional[FilterSpec]]:
+        column_map = {col.lower(): col for col in df.columns} if case_insensitive else None
         filter_obj = message.get("filter") or {}
         mask = pd.Series([True] * len(df), index=df.index)
         if base_filters:
-            mask = mask & self._mask_from_filter_specs(base_filters, df)
+            mask = mask & self._mask_from_filter_specs(base_filters, df, column_map)
         json_nodes: List[Dict[str, Any]] = []
         stored_spec: Optional[FilterSpec] = None
 
         dsl_text = filter_obj.get("dsl") if filter_obj else None
         if dsl_text:
-            dsl_mask, _ = _evaluate_dsl_filter(dsl_text, df)
+            dsl_mask, _ = _evaluate_dsl_filter(dsl_text, df, column_map)
             mask = mask & dsl_mask
 
         if filter_obj.get("json"):
             json_spec = deepcopy(filter_obj["json"])
-            json_mask = _evaluate_json_filter(json_spec, df)
+            json_mask = _evaluate_json_filter(json_spec, df, column_map)
             mask = mask & json_mask
             json_nodes.append(json_spec)
 
@@ -637,7 +846,7 @@ class OdbArgoViewPlugin:
                 ]
             }
             json_nodes.append(bbox_json)
-            mask = mask & _evaluate_json_filter(bbox_json, df)
+            mask = mask & _evaluate_json_filter(bbox_json, df, column_map)
 
         start = message.get("start")
         end = message.get("end")
@@ -666,7 +875,7 @@ class OdbArgoViewPlugin:
                 else:
                     time_json = {"and": time_nodes}
                 json_nodes.append(time_json)
-                mask = mask & _evaluate_json_filter(time_json, df)
+                mask = mask & _evaluate_json_filter(time_json, df, column_map)
 
         combined_json: Optional[Dict[str, Any]] = None
         if json_nodes:
@@ -680,7 +889,14 @@ class OdbArgoViewPlugin:
 
         return mask.fillna(False), stored_spec
 
-    def _collect_columns(self, message: Dict[str, Any], subset_filters: Optional[List[FilterSpec]] = None, allowed_columns: Optional[List[str]] = None) -> List[str]:
+    def _collect_columns(
+        self,
+        message: Dict[str, Any],
+        subset_filters: Optional[List[FilterSpec]] = None,
+        allowed_columns: Optional[List[str]] = None,
+        *,
+        case_insensitive: bool = False,
+    ) -> List[str]:
         columns = message.get("columns") or []
         extra_cols: List[str] = []
         filter_obj = message.get("filter") or {}
@@ -706,13 +922,23 @@ class OdbArgoViewPlugin:
         if message.get("orderBy"):
             for entry in message["orderBy"]:
                 extra_cols.append(entry.get("col"))
-        result = []
+        combined = []
+        seen: set[str] = set()
         for col in list(columns) + extra_cols:
-            if col and col not in result:
-                result.append(col)
+            if not col:
+                continue
+            if case_insensitive and isinstance(col, str):
+                col_value = col.lower()
+            else:
+                col_value = col
+            if col_value in seen:
+                continue
+            seen.add(col_value)
+            combined.append(col_value)
         if allowed_columns is not None:
-            result = [col for col in result if col in allowed_columns]
-        return result
+            allowed_set = set(allowed_columns)
+            combined = [col for col in combined if col in allowed_set]
+        return combined
 
     def _apply_order(self, df: pd.DataFrame, order_by: List[Dict[str, Any]], allowed_columns: Optional[List[str]] = None) -> pd.DataFrame:
         if not order_by:
@@ -782,6 +1008,15 @@ class OdbArgoViewPlugin:
             return "count"  # sentinel handled at call site
         raise PluginError("PLOT_FAIL", f"Unsupported agg '{agg}'")
 
+    def _find_column(self, df: "pd.DataFrame", name: str) -> str:
+        if name in df.columns:
+            return name
+        lower = name.lower()
+        for candidate in df.columns:
+            if candidate.lower() == lower:
+                return candidate
+        raise PluginError("COLUMN_UNKNOWN", f"Unknown groupBy column '{name}'")
+
     def _apply_groupby_bins(self, df: "pd.DataFrame", spec: str) -> Tuple["pd.DataFrame", str, Optional[str]]:
         """
         Parse one groupBy spec and return (df_with_bincol, group_col_name, resample_freq_or_None).
@@ -793,23 +1028,22 @@ class OdbArgoViewPlugin:
         import numpy as np
         if ":" not in spec:
             col = spec.strip()
-            if col not in df.columns:
-                raise PluginError("COLUMN_UNKNOWN", f"Unknown groupBy column '{col}'")
-            return df, col, None
-        col, param = (s.strip() for s in spec.split(":", 1))
-        if col.upper() == "TIME":
-            return df, col, param  # tell caller to resample on time
-        if col not in df.columns:
-            raise PluginError("COLUMN_UNKNOWN", f"Unknown groupBy column '{col}'")
+            resolved = self._find_column(df, col)
+            return df, resolved, None
+        col_raw, param = (s.strip() for s in spec.split(":", 1))
+        if col_raw.upper() == "TIME":
+            resolved = self._find_column(df, col_raw)
+            return df, resolved, param  # tell caller to resample on time
+        resolved = self._find_column(df, col_raw)
         try:
             bw = float(param)
             if bw <= 0:
                 raise ValueError
         except Exception:
-            return df, col, None
-        bin_col = f"__bin__{col}"
+            return df, resolved, None
+        bin_col = f"__bin__{resolved}"
         df = df.copy()
-        df[bin_col] = (np.floor(df[col].astype(float) / bw) * bw).astype(df[col].dtype, copy=False)
+        df[bin_col] = (np.floor(df[resolved].astype(float) / bw) * bw).astype(df[resolved].dtype, copy=False)
         return df, bin_col, None
 
     def _parse_group_by_spec(self, df: "pd.DataFrame", group_by: Optional[List[str]]):
@@ -882,12 +1116,31 @@ class OdbArgoViewPlugin:
         allowed_columns: Optional[List[str]],
     ) -> Tuple[str, str, Optional[str]]:
         style = message.get("style") or {}
-        lon_col = message.get("x") or style.get("lon") or "LONGITUDE"
-        lat_col = style.get("lat") or "LATITUDE"
-        value_col = message.get("z") or style.get("field") or style.get("fields")
+        lon_candidates = [message.get("x"), style.get("lon"), "LONGITUDE", "longitude", "lon"]
+        lon_candidates = [c for c in lon_candidates if c]
+        lon_col = self._resolve_column(df, lon_candidates or ["longitude"], "LONGITUDE")
+
+        lat_candidates = [style.get("lat"), message.get("lat"), "LATITUDE", "latitude", "lat"]
+        lat_candidates = [c for c in lat_candidates if c]
+        lat_col = self._resolve_column(df, lat_candidates or ["latitude"], "LATITUDE")
+
+        value_candidates: List[str] = []
+        for key in ("z", "field", "fields"):
+            candidate = style.get(key) if key != "z" else message.get("z")
+            if isinstance(candidate, str):
+                value_candidates.append(candidate)
         y_token = message.get("y")
-        if not value_col and y_token and y_token not in {lon_col, lat_col}:
-            value_col = y_token
+        if isinstance(y_token, str):
+            value_candidates.append(y_token)
+        value_col: Optional[str] = None
+        for cand in value_candidates:
+            try:
+                value_col = self._resolve_column(df, [cand], cand)
+                if value_col:
+                    break
+            except PluginError:
+                continue
+
         required = [lon_col, lat_col]
         if value_col:
             required.append(value_col)
@@ -1232,8 +1485,10 @@ class OdbArgoViewPlugin:
         """
         try:
             dataset_key = message.get("datasetKey")
-            subset_key = message.get("subsetKey")
             base_ds, subset_spec = self.store.resolve(dataset_key)
+            case_insensitive = self._dataset_case_flag(dataset_key, message)
+            message = self._normalise_case_payload(message, case_insensitive)
+            subset_key = message.get("subsetKey")
             allowed_columns = subset_spec.columns if (subset_spec and subset_spec.columns is not None) else None
 
             df = _build_dataframe(base_ds)
@@ -1244,6 +1499,7 @@ class OdbArgoViewPlugin:
                 message,
                 subset_filters=subset_spec.filters if subset_spec else None,
                 allowed_columns=allowed_columns,
+                case_insensitive=case_insensitive,
             )
             # normalize to list
             if columns is None:
@@ -1315,7 +1571,10 @@ class OdbArgoViewPlugin:
             # Build mask/order with subset filters merged
             order_by = message.get("orderBy") or []
             filter_mask, requested_spec = self._parse_filter(
-                message, df, base_filters=subset_spec.filters if subset_spec else None
+                message,
+                df,
+                base_filters=subset_spec.filters if subset_spec else None,
+                case_insensitive=case_insensitive,
             )
             df = df[filter_mask]
             df = self._apply_order(df, order_by, allowed_columns)
@@ -1407,6 +1666,8 @@ class OdbArgoViewPlugin:
         kind = message.get("kind")
         if not kind:
             raise PluginError("PLOT_FAIL", "Missing plot kind")
+        case_insensitive = self._dataset_case_flag(message.get("datasetKey"), message)
+        message = self._normalise_case_payload(message, case_insensitive)
         x_col = message.get("x")
         y_col = message.get("y")
         style = dict(message.get("style") or {})
@@ -1447,7 +1708,12 @@ class OdbArgoViewPlugin:
         df = _build_dataframe(base_ds)
         allowed_columns = subset_spec.columns if (subset_spec and subset_spec.columns is not None) else None
 
-        filter_mask, _ = self._parse_filter(message, df, base_filters=subset_spec.filters if subset_spec else None)
+        filter_mask, _ = self._parse_filter(
+            message,
+            df,
+            base_filters=subset_spec.filters if subset_spec else None,
+            case_insensitive=case_insensitive,
+        )
         df = df[filter_mask]
         df = self._apply_order(df, message.get("orderBy") or [], allowed_columns=None)
 
@@ -1834,6 +2100,9 @@ class OdbArgoViewPlugin:
         if export_format != "csv":
             raise PluginError("EXPORT_FAIL", f"Unsupported export format '{export_format}'")
 
+        case_insensitive = self._dataset_case_flag(dataset_key, message)
+        message = self._normalise_case_payload(message, case_insensitive)
+
         columns = message.get("columns") or []
         base_ds, subset_spec = self.store.resolve(dataset_key)
         df = _build_dataframe(base_ds)
@@ -1849,7 +2118,12 @@ class OdbArgoViewPlugin:
                 if col not in df.columns:
                     raise PluginError("COLUMN_UNKNOWN", f"Unknown column '{col}'")
 
-        filter_mask, _ = self._parse_filter(message, df, base_filters=subset_spec.filters if subset_spec else None)
+        filter_mask, _ = self._parse_filter(
+            message,
+            df,
+            base_filters=subset_spec.filters if subset_spec else None,
+            case_insensitive=case_insensitive,
+        )
         df = df[filter_mask]
 
         df = self._apply_order(df, message.get("orderBy") or [], allowed_columns)
@@ -1909,6 +2183,8 @@ def _compute_plot_bytes(plugin: OdbArgoViewPlugin, message: Dict[str, Any]) -> b
 
 def _compute_export_bytes(plugin: OdbArgoViewPlugin, message: Dict[str, Any]) -> Tuple[str, bytes, str]:
     dataset_key = message.get("datasetKey")
+    case_insensitive = plugin._dataset_case_flag(dataset_key, message)
+    message = plugin._normalise_case_payload(message, case_insensitive)
     columns = message.get("columns") or []
     base_ds, subset_spec = plugin.store.resolve(dataset_key)
     df = _build_dataframe(base_ds)
@@ -1921,7 +2197,12 @@ def _compute_export_bytes(plugin: OdbArgoViewPlugin, message: Dict[str, Any]) ->
         for col in columns:
             if col not in df.columns:
                 raise PluginError("COLUMN_UNKNOWN", f"Unknown column '{col}'")
-    filter_mask, _ = plugin._parse_filter(message, df, base_filters=subset_spec.filters if subset_spec else None)
+    filter_mask, _ = plugin._parse_filter(
+        message,
+        df,
+        base_filters=subset_spec.filters if subset_spec else None,
+        case_insensitive=case_insensitive,
+    )
     df = df[filter_mask]
     df = plugin._apply_order(df, message.get("orderBy") or [], allowed_columns)
     if columns:

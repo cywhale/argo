@@ -63,6 +63,11 @@ Type WMO float numbers like:</p>
 <li>The CLI retries <strong>3 times with 10-second intervals</strong> if a download fails.</li>
 <li>It&#39;s recommended to fetch ≤ 3 WMOs at a time on slow connections.</li>
 </ul>
+<h4 id="case-insensitive-variables">Case-insensitive variables</h4>
+<p><code>odbargo-cli</code> treats variable names case-insensitively by default (flag <code>--case-insensitive-vars</code>, or
+environment variable <code>ODBARGO_CASE_INSENSITIVE_VARS=0|1</code>). This keeps commands compatible with both legacy
+upper-case NetCDF files and the newer lower-case ERDDAP exports. Set the flag to <code>False</code> only if you require
+strict, case-sensitive matching, use <code>--no-case-insensitive-vars</code> or <code>ODBARGO_CASE_INSENSITIVE_VARS=0</code>.</p>
 <h4 id="frontend-connected-mode">Frontend-connected mode</h4>
 <p>  If the <a href="https://api.odb.ntu.edu.tw/hub/settings" target="_blank">Ocean APIverse</a> &gt; Options &gt; Plugin &gt; Enable OdbArgo detects this tool running locally, it will communicate via <code>ws://localhost:8765</code> to trigger downloads directly.</p>
 <p>  Use ODB <a href="https://api.odb.ntu.edu.tw/hub/earth/settings?ogcurl=https://ecodata.odb.ntu.edu.tw/geoserver/odbargo/wms&amp;service=WMS&amp;layer=argofloats" target="_blank">Argofloats WMS layer</a> directly on Ocean APIverse.</p>

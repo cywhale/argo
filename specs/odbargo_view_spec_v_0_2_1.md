@@ -360,6 +360,8 @@ Main CLI spawns plugin on first `view.*` command. Plugin must respond with:
 
 * Inputs: `x: TIME`, `y: <var>`, optional `groupBy` (e.g., by LATITUDE:1.0 or CYCLE)
 * Style: `width,height,dpi,title,marker,line,alpha,cmap,legend (bool),legend_loc,legend_fontsize,pointSize`
+* Case handling: unless `caseInsensitive=false`, the viewer treats column names
+  case-insensitively and reports fields in lower-case.
 
 ### 6.2 `profile`
 

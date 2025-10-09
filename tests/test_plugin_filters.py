@@ -4,7 +4,7 @@ import xarray as xr
 
 pytest.importorskip("pandas", reason="pandas is required for plugin filtering tests")
 
-from odbargo_view.plugin import OdbArgoViewPlugin, PluginError, _build_dataframe
+from odbargo_view.plugin import DatasetStore, OdbArgoViewPlugin, PluginError, _build_dataframe
 
 
 def make_dataset() -> xr.Dataset:
@@ -89,3 +89,100 @@ def test_apply_order_sorts_dataframe():
     assert ordered["A"].tolist() == [1, 2, 3]
     ordered_desc = plugin._apply_order(df, [{"col": "B", "dir": "desc"}])
     assert ordered_desc["B"].tolist() == [30, 20, 10]
+
+
+def test_json_filter_between_node_is_supported():
+    import pandas as pd
+
+    plugin = OdbArgoViewPlugin()
+    df = pd.DataFrame({"longitude": [0.0, 5.0, 15.0]})
+
+    mask, _ = plugin._parse_filter(
+        {"filter": {"json": {"between": ["longitude", -1.0, 10.0]}}},
+        df,
+    )
+
+    assert mask.tolist() == [True, True, False]
+
+
+def test_timeseries_plot_honours_case_insensitive_columns(tmp_path):
+    plugin = OdbArgoViewPlugin()
+
+    times = np.array([
+        "2003-01-01T00:00:00",
+        "2003-01-02T00:00:00",
+        "2003-01-03T00:00:00",
+        "2003-01-04T00:00:00",
+    ], dtype="datetime64[ns]")
+    ds = xr.Dataset(
+        data_vars={
+            "temp": ("row", np.linspace(5.0, 8.0, 4)),
+            "pres": ("row", np.array([5.0, 25.0, 50.0, 75.0])),
+        },
+        coords={
+            "row": np.arange(4),
+            "time": ("row", times),
+            "longitude": ("row", np.linspace(120.0, 121.0, 4)),
+            "latitude": ("row", np.linspace(22.0, 24.0, 4)),
+        },
+    )
+
+    path = tmp_path / "flat_plot.nc"
+    ds.to_netcdf(path)
+
+    store = DatasetStore()
+    store.open_dataset("flat", str(path), case_insensitive=True)
+
+    plugin.store = store
+
+    png = plugin._render_plot(
+        {
+            "datasetKey": "flat",
+            "kind": "timeseries",
+            "x": "TIME",
+            "y": "TEMP",
+            "groupBy": ["PRES:25"],
+            "caseInsensitive": True,
+            "filter": {"dsl": "PRES >= 0"},
+        }
+    )
+
+    assert isinstance(png, (bytes, bytearray))
+    assert len(png) > 0
+
+
+def test_map_plot_case_insensitive_defaults(tmp_path):
+    plugin = OdbArgoViewPlugin()
+
+    ds = xr.Dataset(
+        data_vars={
+            "temp": ("row", np.linspace(5.0, 8.0, 6)),
+            "pres": ("row", np.linspace(0.0, 60.0, 6)),
+        },
+        coords={
+            "row": np.arange(6),
+            "time": ("row", np.array(["2003-01-01", "2003-01-02", "2003-01-03", "2003-01-04", "2003-01-05", "2003-01-06"], dtype="datetime64[ns]")),
+            "longitude": ("row", np.linspace(120.0, 121.0, 6)),
+            "latitude": ("row", np.linspace(22.0, 24.5, 6)),
+        },
+    )
+
+    path = tmp_path / "map_plot.nc"
+    ds.to_netcdf(path)
+
+    store = DatasetStore()
+    store.open_dataset("map", str(path), case_insensitive=True)
+    plugin.store = store
+
+    png = plugin._render_plot(
+        {
+            "datasetKey": "map",
+            "kind": "map",
+            "y": "TEMP",
+            "filter": {"dsl": "PRES >= 0"},
+            "caseInsensitive": True,
+        }
+    )
+
+    assert isinstance(png, (bytes, bytearray))
+    assert len(png) > 0
