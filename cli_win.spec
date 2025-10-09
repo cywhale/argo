@@ -22,6 +22,10 @@ excludes = [
     "tkinter", "PyQt5", "PySide2", "PySide6", "wx", "gi", "gtk",
     # misc
     "mpl_toolkits.mplot3d", "mpl_toolkits.basemap",
+    # Additional exclusions to reduce size
+    "doctest", "pdb", "unittest", "test", "tests",
+    "_testcapi", "_testinternalcapi", "_testimportmultiple",
+    "distutils", "lib2to3",	
 ]
 
 block_cipher = None
@@ -41,6 +45,11 @@ a = Analysis(
     cipher=block_cipher,
     noarchive=False,        # keep default; one-file will still pack everything
 )
+# Remove setuptools._vendor data files if not needed
+# a.datas = [
+#     (dest, source, typecode) for dest, source, typecode in a.datas
+#     if not dest.startswith("setuptools/_vendor/")
+# ]
 
 pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 
@@ -56,7 +65,7 @@ exe = EXE(
     bootloader_ignore_signals=False,
     strip=STRIP,
     upx=bool(UPX_DIR), # enable UPX only if UPX_DIR is set
-    upx_exclude=[],
+    upx_exclude=["VCRUNTIME140.dll", "VCRUNTIME140_1.dll", "ucrtbase.dll"],
     runtime_tmpdir=None,
     console=True,           # CLI app → console window
     version='version.txt',
