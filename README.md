@@ -33,7 +33,7 @@ We publish **only** the small CLI binaries:
   - Find a full source archive: [odbargo-0.x.y.tar.gz](https://github.com/cywhale/argo/tree/main/dist)
 
 ```bash
-pip install odbargo-0.x.y.tar.gz
+pip install "odbargo-0.x.y.tar.gz[view]"
 ```
 
 ### 2. Run the CLI
