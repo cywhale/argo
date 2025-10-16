@@ -26,7 +26,7 @@ CLI 可以獨立使用；需要視覺化時再啟動 viewer。
 - **安裝 全部（含  viewer 原始套件）**：自 [dist](https://github.com/cywhale/argo/tree/main/dist) 下載 `odbargo-0.x.y.tar.gz`
 
 ```bash
-pip install odbargo-0.x.y.tar.gz
+pip install "odbargo-0.x.y.tar.gz[view]"
 ```
 
 ### 2. 執行 CLI
