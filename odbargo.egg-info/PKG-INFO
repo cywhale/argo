@@ -9,6 +9,7 @@ Provides-Extra: view
 Requires-Dist: xarray>=2024.6.0; extra == "view"
 Requires-Dist: h5netcdf; extra == "view"
 Requires-Dist: h5py; extra == "view"
+Requires-Dist: netCDF4; extra == "view"
 Requires-Dist: matplotlib>=3.8; extra == "view"
 Requires-Dist: numpy>=1.26; extra == "view"
 Requires-Dist: pandas>=2.1; extra == "view"
@@ -48,7 +49,7 @@ We publish **only** the small CLI binaries:
   - Find a full source archive: [odbargo-0.x.y.tar.gz](https://github.com/cywhale/argo/tree/main/dist)
 
 ```bash
-pip install odbargo-0.x.y.tar.gz
+pip install "odbargo-0.x.y.tar.gz[view]"
 ```
 
 ### 2. Run the CLI
