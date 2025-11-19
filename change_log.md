@@ -75,3 +75,4 @@
         -- ensure viewer lazily normalises already-open datasets, reuses column resolver for groupBy/map axes, and propagates filters under case-insensitive mode
         -- extend CLI slash handling to surface plugin error payloads and forward explicit case flags to WS-registered viewers
         -- update docs (README.md/html + Traditional Chinese) and specs/odbargo_view_spec_v_0_2_1.md; add tests for legacy → lowercase conversion, JSON between filters, map/timeseries plots, and CSV export
+#### ver 0.2.8 No significant changes, only document all spec changes in specs/odbargo_view_spec_v_0_2_8.md
