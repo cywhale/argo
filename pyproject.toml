@@ -29,7 +29,7 @@ odbargo-view = "odbargo_view.plugin:main"
 
 [tool.setuptools]
 # Explicitly list the only packages to include
-packages = ["cli", "odbargo_view"]
+packages = ["cli", "odbargo_view", "odbViz"]
 
 # If you plan to include additional subpackages under these, use pattern find:
 # [tool.setuptools.packages.find]

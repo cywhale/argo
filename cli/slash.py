@@ -171,6 +171,11 @@ def parse_slash_command(raw: str, fallback_dataset: Optional[str]) -> ParsedComm
                 "x",
                 "y",
                 "z",
+                "engine",
+                "map-engine",
+                "map-method",
+                "vmin",
+                "vmax",
                 "limit",
                 "out",
                 "bins",
@@ -211,6 +216,12 @@ def parse_slash_command(raw: str, fallback_dataset: Optional[str]) -> ParsedComm
                     options["y"] = value
                 elif name == "z":
                     options["z"] = value
+                elif name in {"engine", "map-engine", "map-method"}:
+                    options["engine"] = value
+                elif name == "vmin":
+                    options.setdefault("style", {})["vmin"] = float(value)
+                elif name == "vmax":
+                    options.setdefault("style", {})["vmax"] = float(value)
                 elif name == "limit":
                     options["limit"] = int(value)
                 elif name == "out":
@@ -244,7 +255,7 @@ def parse_slash_command(raw: str, fallback_dataset: Optional[str]) -> ParsedComm
                     options["groupBy"] = [item.strip() for item in value.split(",") if item.strip()]
                 elif name == "agg":
                     options["agg"] = value                
-            elif name in {"invert-y", "no-invert-y", "grid", "echo-json", "trim-dims", "legend"}:
+            elif name in {"invert-y", "no-invert-y", "grid", "echo-json", "trim-dims", "legend", "gridded", "categorical"}:
                 if name == "invert-y":
                     options.setdefault("style", {})["invert_y"] = True
                 elif name == "no-invert-y":
@@ -257,6 +268,10 @@ def parse_slash_command(raw: str, fallback_dataset: Optional[str]) -> ParsedComm
                     options["trimDimensions"] = True
                 elif name == "legend":
                     options.setdefault("style", {})["legend"] = True
+                elif name == "gridded":
+                    options["gridded"] = True
+                elif name == "categorical":
+                    options["categorical"] = True
             else:
                 raise ValueError(f"Unknown option --{name}")
 

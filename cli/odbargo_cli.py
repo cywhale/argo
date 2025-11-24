@@ -1625,6 +1625,7 @@ def display_plot_window(png_bytes: bytes, loop: Optional[asyncio.AbstractEventLo
     import subprocess
     import tempfile
     import webbrowser
+    import threading
     from pathlib import Path
 
     # 1) Save to a temp file (prefix/suffix help users recognize the file)
@@ -1638,35 +1639,45 @@ def display_plot_window(png_bytes: bytes, loop: Optional[asyncio.AbstractEventLo
         print(f"⚠️  Failed to write plot to temp file: {exc}")
         return
 
-    # 2) Try to open with the OS default image viewer
+    # 2) Try to open with the OS default image viewer without blocking the CLI
+    def _spawn(cmd: List[str]) -> bool:
+        try:
+            subprocess.Popen(
+                cmd,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                start_new_session=True,
+            )
+            return True
+        except Exception:
+            return False
+
     opened = False
-    try:
-        sysname = platform.system()
-        if sysname == "Windows":
-            # 'start' is a shell built-in; use cmd /c
-            subprocess.run(["cmd", "/c", "start", "", str(temp_path)], check=False)
+    sysname = platform.system()
+    if sysname == "Windows":
+        try:
+            os.startfile(temp_path)  # type: ignore[attr-defined]
             opened = True
-        elif sysname == "Darwin":
-            subprocess.run(["open", str(temp_path)], check=False)
-            opened = True
-        else:
-            # Linux/BSD: xdg-open is the common launcher; harmless if it no-ops on headless
-            subprocess.run(["xdg-open", str(temp_path)], check=False)
-            opened = True
-    except Exception:
-        opened = False
+        except Exception:
+            opened = _spawn(["cmd", "/c", "start", "", str(temp_path)])
+    elif sysname == "Darwin":
+        opened = _spawn(["open", str(temp_path)])
+    else:
+        opened = _spawn(["xdg-open", str(temp_path)])
 
-        if opened:
-            print(f"🖼️  Opened with system viewer → {temp_path}")
-            return
-
-    # 3) Fallback: try default browser
-    try:
-        webbrowser.open("file://" + str(temp_path))
-        print(f"🖼️  Opened in default browser → {temp_path}")
+    if opened:
+        print(f"🖼️  Opened with system viewer → {temp_path}")
         return
-    except Exception:
-        pass
+
+    # 3) Fallback: try default browser in a background thread to avoid blocking
+    def _open_browser() -> None:
+        try:
+            webbrowser.open("file://" + str(temp_path))
+            print(f"🖼️  Opened in default browser → {temp_path}")
+        except Exception:
+            print(f"🖼️  Plot saved to {temp_path}")
+
+    threading.Thread(target=_open_browser, name="plot-browser", daemon=True).start()
 
     # 4) Last resort: tell the user where the file is
     print(f"🖼️  Plot saved to: {temp_path}")

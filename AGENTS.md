@@ -1,24 +1,28 @@
 # Repository Guidelines
 
 ## Project Structure & Module Organization
-Source lives under `argo_app/`: `app.py` runs the FastAPI service and WebSocket handlers, while `src/config.py` centralises cache, output, and port defaults. The standalone downloader lives in `odbargo-cli.py`, with console scripts declared in `setup.py`. Packaging artefacts sit in `dist/`, helper scripts in `scripts/`, configuration samples in `conf/`, and exploratory notebooks in `dev/`.
+Core CLI sources live in `cli/` (entry points `__main__.py`, `odbargo_cli.py`, and slash-command helpers) while the optional viewer plugin sits in `odbargo_view/`. The FastAPI bridge that powers Ocean APIverse stays under `argo_app/`, with shared defaults in `argo_app/src/config.py`. PyInstaller specs (`cli.spec`, `view.spec`) and entry helpers (`cli_entry.py`, `view_entry.py`) remain at the repo root; outputs land in `dist/`. Supporting artifacts live in `scripts/` (build automation), `conf/` (sample configs), `specs/` (UX references), and `dev/` (notebooks). Tests target CLI behaviors inside `tests/` (`test_slash_commands.py`, `test_plugin_client.py`, `test_wmo_parser.py`).
 
 ## Build, Test, and Development Commands
-Create an isolated environment before contributing:
-```bash
-python -m venv .venv && source .venv/bin/activate
-pip install -e .  # installs CLI and FastAPI app locally
 ```
-Install dependencies quickly with `pip install -r requirements.txt`. Run the websocket CLI via `python odbargo-cli.py --port 8765`; the binaries in `dist/` behave the same. Launch the API server with `uvicorn argo_app.app:app --reload --port 8090`. Release builds for the bundled executables come from `scripts/build_odbargo-cli.sh` (Windows) and `scripts/build_argopy_cli.sh` (Linux).
+python -m venv .venv && source .venv/bin/activate
+pip install -e .[view]          # editable CLI plus viewer extras
+python cli_entry.py             # run websocket CLI from source
+python view_entry.py            # launch viewer shell
+uvicorn argo_app.app:app --reload --port 8090   # FastAPI service
+python -m pytest                # run suite
+python -m build                 # build wheel/tarball
+```
+Refresh PyInstaller binaries via `scripts/build_odbargo-cli.sh` (Linux) or the Windows helper under `scripts/win_installer/`.
 
 ## Coding Style & Naming Conventions
-Follow PEP 8 with 4-space indentation and snake_case symbols. Keep routers, Pydantic models, and background workers in focused helpers, and centralise configurable constants in `argo_app/src/config.py`. Prefer structured logging over prints when extending the service, and align CLI arguments with existing long options (`--port`, `--insecure`).
+Stick to PEP 8 with 4-space indentation, snake_case functions, and PascalCase classes. Extend CLI options with long flags that mirror existing names (`--port`, `--case-insensitive-vars`) plus env overrides like `ODBARGO_CASE_INSENSITIVE_VARS`. Keep FastAPI route handlers thin by pushing shared logic into helpers and prefer `logging` over `print`. Add type hints/docstrings when public APIs change and update `pyproject.toml` whenever scripts or extras shift.
 
 ## Testing Guidelines
-There is no automated suite today; add `pytest`-style tests under `tests/test_*.py` so they are CI-ready. Mock `DataFetcher` responses or patch network calls to avoid ERDDAP traffic. After edits, hit `curl http://localhost:8090/argo/api/test` and trigger a small CLI download (e.g., `python odbargo-cli.py 5903377`). Note any manual verification in your PR until automation arrives.
+Tests rely on `pytest`; name modules `test_<feature>.py` for auto-discovery. When a scenario hits argopy or ERDDAP, stub `DataFetcher` or feed temp NetCDF fixtures via `tmp_path` to keep the suite deterministic. After automated tests, hit `curl http://localhost:8090/argo/api/test` for the API heartbeat and run one CLI download (`odbargo-cli 5903377`) to exercise the websocket path. Capture unusual manual steps in PR notes.
 
 ## Commit & Pull Request Guidelines
-Commits use short, imperative summaries (e.g., `add --insecure flag retry logic`). Group related changes and avoid checking in build artefacts. Pull requests should call out the user-facing impact, link issues, and include logs or screenshots showing both CLI and API downloads still succeed. Document reproduction steps and any configuration tweaks (`config.outputPath`, ports) for reviewers.
+Commits use short, imperative subjects (“add viewer spec regression tests”). Group related edits, exclude generated binaries/notebooks, and keep version bumps (`version*.txt`, `dist/manifest`) synchronized with CLI changes. PRs should outline user impact, link issues, and attach CLI/API logs or viewer screenshots whenever behavior shifts. Update the relevant README/spec if commands, defaults, or ports change.
 
-## Release & Configuration Notes
-When changing cache or output behaviour, update `argo_app/src/config.py` and mirror instructions in `README.md`. Keep version bumps in `setup.py` and `version.txt` aligned, and refresh installers under `scripts/win_installer/` whenever CLI flags change. Never commit credentials; load secrets from untracked `.env` files before launching the server.
+## Security & Configuration Tips
+Never commit credentials. Keep ERDDAP or API tokens in local `.env` files loaded before invoking `uvicorn`. Adjust cache/output paths through `argo_app/src/config.py` or environment overrides, and document any port updates so downstream clients expecting `ws://localhost:8765` or the 8090 diagnostics endpoint stay aligned.

@@ -76,3 +76,4 @@
         -- extend CLI slash handling to surface plugin error payloads and forward explicit case flags to WS-registered viewers
         -- update docs (README.md/html + Traditional Chinese) and specs/odbargo_view_spec_v_0_2_1.md; add tests for legacy → lowercase conversion, JSON between filters, map/timeseries plots, and CSV export
 #### ver 0.2.8 No significant changes, only document all spec changes in specs/odbargo_view_spec_v_0_2_8.md
+#### ver 0.2.9 Breaking new odbViz created to replace odbargo_view as a universal plotter for ODB CLI/n1
