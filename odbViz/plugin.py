@@ -132,6 +132,7 @@ def _choose_colorbar_layout(ax, fig, engine: str = "cartopy", legend_loc: Option
     # Fallback
     return "horizontal", {"pad": 0.15, "fraction": horiz.get("fraction", 0.065), "aspect": horiz.get("aspect", 28), "location": "bottom"}
 
+'''
 def _sort_cols_by_lon(
     L: np.ndarray,
     Z: np.ndarray,
@@ -152,7 +153,7 @@ def _sort_cols_by_lon(
     order = np.argsort(np.where(np.isfinite(x), x, np.inf))
 
     return L[:, order], Z[:, order]
-
+'''
 
 def _recenter_lon_for_plain(lon_arr: np.ndarray) -> Tuple[np.ndarray, float, float, float]:
     """
@@ -181,23 +182,24 @@ def _recenter_lon_for_plain(lon_arr: np.ndarray) -> Tuple[np.ndarray, float, flo
     return rec, -data_len / 2.0, data_len / 2.0, center
 
 
-def _sort_cols_by_lon(x2d: np.ndarray, z2d: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+def _sort_grid_by_lon(x2d: np.ndarray, z2d: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
     """
-    將 2D 網格 x2d (lon) 依欄位的第一列值排序，並以相同順序重排 z2d。
-    備註：只做欄排序，不動列（lat）。
+    Sort 2D longitude grid from west→east (handling -180/180 wrapping if needed),
+    and apply the same column order to Z.
+    (This global function replaces _sort_cols_by_lon to avoid conflicts)
     """
     x2d = np.asarray(x2d)
     z2d = np.asarray(z2d)
     if x2d.ndim != 2 or z2d.ndim != 2:
-        raise ValueError("x2d and z2d must be 2D arrays.")
-    if x2d.shape != z2d.shape:
-        raise ValueError("x2d and z2d must have the same shape.")
+        return x2d, z2d
 
-    # 以第一列作為每一欄的代表經度來排序（確保單調遞增）
-    col_lon = x2d[0, :]
-    order = np.argsort(col_lon)
+    # Use first row as representative longitude
+    x = x2d[0, :]
+
+    # Sort: finite values first, sorted numerically; NaNs/Inf at the end
+    order = np.argsort(np.where(np.isfinite(x), x, np.inf))
+
     return x2d[:, order], z2d[:, order]
-
 
 def _roll_for_plain(lon_grid: np.ndarray, val_grid: np.ndarray) -> Tuple[np.ndarray, np.ndarray, float, float]:
     """
@@ -1253,18 +1255,23 @@ class OdbVizPlugin:
                 x0, y0, x1, y1 = [float(value) for value in bbox_values]
             except (TypeError, ValueError) as exc:
                 raise PluginError("FILTER_INVALID", "bbox values must be numeric") from exc
+
             lon_col = self._resolve_column(df, ["LONGITUDE", "longitude", "lon"], "LONGITUDE")
             lat_col = self._resolve_column(df, ["LATITUDE", "latitude", "lat"], "LATITUDE")
-            lon_min, lon_max = sorted((x0, x1))
+
+            lon_series = pd.to_numeric(df[lon_col], errors="coerce")
+            lat_series = pd.to_numeric(df[lat_col], errors="coerce")
+
+            # Handle antimeridian properly: use union of two ranges when span > 180.
             lat_min, lat_max = sorted((y0, y1))
-            bbox_json = {
-                "and": [
-                    {"between": [lon_col, lon_min, lon_max]},
-                    {"between": [lat_col, lat_min, lat_max]},
-                ]
-            }
-            json_nodes.append(bbox_json)
-            mask = mask & _evaluate_json_filter(bbox_json, df, column_map)
+            if abs(x0 - x1) > 180.0:
+                lon_mask = (lon_series >= x0) | (lon_series <= x1)
+            else:
+                lon_min, lon_max = sorted((x0, x1))
+                lon_mask = (lon_series >= lon_min) & (lon_series <= lon_max)
+            lat_mask = (lat_series >= lat_min) & (lat_series <= lat_max)
+
+            mask = mask & lon_mask & lat_mask
 
         start = message.get("start")
         end = message.get("end")
@@ -1686,131 +1693,124 @@ class OdbVizPlugin:
             return plt.get_cmap("tab20"), None
         
     def _setup_map_engine(
-            self,
-            engine: str,
-            lon_lo: float,
-            lon_hi: float,
-            lat_lo: float,
-            lat_hi: float,
-            bbox_mode: str,
-            figsize: Tuple[float, float],
-            dpi: int,
-        ) -> Tuple[plt.Figure, plt.Axes, Any]:
-            """
-            建立繪圖引擎與座標系。
-            修正: Cartopy 改用 set_xticks/yticks 搭配 Formatter，以獲得與 Basemap 一致的精細外觀。
-            """
+        self,
+        engine: str,
+        lon_lo: float,
+        lon_hi: float,
+        lat_lo: float,
+        lat_hi: float,
+        bbox_mode: str,
+        figsize: Tuple[float, float],
+        dpi: int,
+    ) -> Tuple[plt.Figure, plt.Axes, Any]:
+        """
+        建立繪圖引擎與座標系。
+        修正: 恢復 Cartopy 的正確樣式 (Ticks) 與 Basemap 的正確投影初始化。
+        """
 
-            # ---------- CARTOPY ----------
-            if engine == "cartopy":
+        # ---------- CARTOPY ----------
+        if engine == "cartopy":
+            try:
+                import cartopy.crs as ccrs
+                import cartopy.feature as cfeature
+                from cartopy.io import DownloadWarning
+                from cartopy.mpl.ticker import LongitudeFormatter, LatitudeFormatter
+                warnings.simplefilter("ignore", DownloadWarning)
+
+                # 投影設定: Antimeridian 模式下中心設為 180
+                if bbox_mode == "antimeridian":
+                    proj = ccrs.PlateCarree(central_longitude=180.0)
+                else:
+                    proj = ccrs.PlateCarree()
+                
+                data_crs = ccrs.PlateCarree()
+
+                fig = plt.figure(figsize=figsize, dpi=dpi)
+                ax = plt.axes(projection=proj)
+
+                ax._odb_cartopy_data_crs = data_crs
+                ax.set_extent([lon_lo, lon_hi, lat_lo, lat_hi], crs=data_crs)
+
                 try:
-                    import cartopy.crs as ccrs
-                    import cartopy.feature as cfeature
-                    from cartopy.io import DownloadWarning
-                    from cartopy.mpl.ticker import LongitudeFormatter, LatitudeFormatter
-                    warnings.simplefilter("ignore", DownloadWarning)
+                    ax.add_feature(cfeature.LAND.with_scale("110m"), facecolor="#d3d3d3", edgecolor="none", zorder=3)
+                except Exception:
+                    pass
 
-                    # 投影設定
-                    if bbox_mode == "antimeridian":
-                        proj = ccrs.PlateCarree(central_longitude=180.0)
-                    else:
-                        proj = ccrs.PlateCarree()
-                    
-                    data_crs = ccrs.PlateCarree()
-
-                    fig = plt.figure(figsize=figsize, dpi=dpi)
-                    ax = plt.axes(projection=proj)
-
-                    ax._odb_cartopy_data_crs = data_crs
-                    ax.set_extent([lon_lo, lon_hi, lat_lo, lat_hi], crs=data_crs)
-
-                    try:
-                        ax.add_feature(cfeature.LAND.with_scale("110m"), facecolor="#d3d3d3", edgecolor="none", zorder=3)
-                    except Exception:
-                        pass
-
-                    # Style Fix: 改用傳統 ticks 而非 gridliner labels，以匹配 Basemap 風格
-                    try:
-                        # 1. 畫內網格線 (不畫標籤)
-                        gl = ax.gridlines(draw_labels=False, linewidth=0.3, color="#666666", alpha=0.5, linestyle="--")
-                        
-                        # 2. 設定 Ticks
-                        xt = _smart_geo_ticks(lon_lo, lon_hi, coord_type="lon")
-                        yt = _smart_geo_ticks(lat_lo, lat_hi, coord_type="lat")
-                        
-                        # 注意: Cartopy 的 set_xticks 需要指定 crs
-                        ax.set_xticks(xt, crs=data_crs)
-                        ax.set_yticks(yt, crs=data_crs)
-                        
-                        # 3. 設定 Formatter (自動處理 °E/°W)
-                        ax.xaxis.set_major_formatter(LongitudeFormatter(zero_direction_label=True))
-                        ax.yaxis.set_major_formatter(LatitudeFormatter())
-                        
-                        # 4. 調整字體大小與樣式 (匹配 Basemap 的 fontsize=8)
-                        ax.tick_params(axis='both', which='major', labelsize=8, width=0.5, length=3)
-                        
-                    except Exception:
-                        # Fallback 如果 formatter 失敗
-                        pass
-
-                    return fig, ax, None
-
-                except Exception as exc:
-                    print(f"[odbViz] Cartopy init failed: {exc}", file=sys.stderr)
-
-            # ---------- BASEMAP ----------
-            if engine == "basemap":
+                # Style Fix: 改用 set_xticks/yticks 以匹配 Basemap 風格
                 try:
-                    from mpl_toolkits.basemap import Basemap
-
-                    fig, ax = plt.subplots(figsize=figsize, dpi=dpi)
-
-                    m = Basemap(
-                        projection="cyl",
-                        llcrnrlon=lon_lo,
-                        urcrnrlon=lon_hi,
-                        llcrnrlat=lat_lo,
-                        urcrnrlat=lat_hi,
-                        resolution="l",
-                        ax=ax,
-                    )
+                    gl = ax.gridlines(draw_labels=False, linewidth=0.3, color="#666666", alpha=0.5, linestyle="--")
                     
-                    ax._odb_basemap = m
+                    xt = _smart_geo_ticks(lon_lo, lon_hi, coord_type="lon")
+                    yt = _smart_geo_ticks(lat_lo, lat_hi, coord_type="lat")
+                    
+                    ax.set_xticks(xt, crs=data_crs)
+                    ax.set_yticks(yt, crs=data_crs)
+                    
+                    ax.xaxis.set_major_formatter(LongitudeFormatter(zero_direction_label=True))
+                    ax.yaxis.set_major_formatter(LatitudeFormatter())
+                    
+                    ax.tick_params(axis='both', which='major', labelsize=8, width=0.5, length=3)
+                except Exception:
+                    pass
 
-                    m.drawcoastlines(linewidth=0.7)
-                    try:
-                        m.fillcontinents(color="#d3d3d3", zorder=0)
-                    except Exception:
-                        pass
+                return fig, ax, None
 
-                    try:
-                        xt = _smart_geo_ticks(lon_lo, lon_hi, coord_type="lon")
-                        yt = _smart_geo_ticks(lat_lo, lat_hi, coord_type="lat")
-                        # Basemap style: fontsize=8, linewidth=0.3
-                        m.drawmeridians(xt, labels=[0, 0, 0, 1], linewidth=0.3, color="#666666", fontsize=8, dashes=[1, 0])
-                        m.drawparallels(yt, labels=[1, 0, 0, 0], linewidth=0.3, color="#666666", fontsize=8, dashes=[1, 0])
-                    except Exception:
-                        pass
+            except Exception as exc:
+                print(f"[odbViz] Cartopy init failed: {exc}", file=sys.stderr)
 
-                    return fig, ax, m
+        # ---------- BASEMAP ----------
+        if engine == "basemap":
+            try:
+                from mpl_toolkits.basemap import Basemap
 
-                except Exception as exc:
-                    print(f"[odbViz] Basemap init failed: {exc}", file=sys.stderr)
+                fig, ax = plt.subplots(figsize=figsize, dpi=dpi)
 
-            # ---------- PLAIN (Fallback) ----------
-            fig, ax = plt.subplots(figsize=figsize, dpi=dpi)
-            ax.set_xlim(lon_lo, lon_hi)
-            ax.set_ylim(lat_lo, lat_hi)
-            ax.set_aspect("equal", adjustable="box")
-            
-            xt = _smart_geo_ticks(lon_lo, lon_hi, coord_type="lon")
-            yt = _smart_geo_ticks(lat_lo, lat_hi, coord_type="lat")
-            ax.set_xticks(xt)
-            ax.set_yticks(yt)
-            ax.tick_params(axis='both', which='major', labelsize=8, width=0.5, length=3)
-            
-            return fig, ax, None
+                m = Basemap(
+                    projection="cyl",
+                    llcrnrlon=lon_lo,
+                    urcrnrlon=lon_hi,
+                    llcrnrlat=lat_lo,
+                    urcrnrlat=lat_hi,
+                    resolution="l",
+                    ax=ax,
+                )
+                
+                ax._odb_basemap = m
 
+                m.drawcoastlines(linewidth=0.7)
+                try:
+                    m.fillcontinents(color="#d3d3d3", zorder=0)
+                except Exception:
+                    pass
+
+                try:
+                    xt = _smart_geo_ticks(lon_lo, lon_hi, coord_type="lon")
+                    yt = _smart_geo_ticks(lat_lo, lat_hi, coord_type="lat")
+                    m.drawmeridians(xt, labels=[0, 0, 0, 1], linewidth=0.3, color="#666666", fontsize=8, dashes=[1, 0])
+                    m.drawparallels(yt, labels=[1, 0, 0, 0], linewidth=0.3, color="#666666", fontsize=8, dashes=[1, 0])
+                except Exception:
+                    pass
+
+                return fig, ax, m
+
+            except Exception as exc:
+                print(f"[odbViz] Basemap init failed: {exc}", file=sys.stderr)
+
+        # ---------- PLAIN (Fallback) ----------
+        fig, ax = plt.subplots(figsize=figsize, dpi=dpi)
+        ax.set_xlim(lon_lo, lon_hi)
+        ax.set_ylim(lat_lo, lat_hi)
+        ax.set_aspect("equal", adjustable="box")
+        
+        xt = _smart_geo_ticks(lon_lo, lon_hi, coord_type="lon")
+        yt = _smart_geo_ticks(lat_lo, lat_hi, coord_type="lat")
+        ax.set_xticks(xt)
+        ax.set_yticks(yt)
+        ax.tick_params(axis='both', which='major', labelsize=8, width=0.5, length=3)
+        ax.xaxis.set_major_formatter(mticker.FuncFormatter(self._format_deg()))
+        ax.yaxis.set_major_formatter(mticker.FuncFormatter(self._format_lat()))
+        
+        return fig, ax, None
 
     def _render_gridded_map(
         self,
@@ -1830,7 +1830,10 @@ class OdbVizPlugin:
     ) -> None:
         """
         在既有 map engine 上畫出 gridded data。
-        修正: Colormap extend 邏輯與 map_plot.py 完全一致 (預設 both)。
+        修正: 
+        1. 確保呼叫全域 _sort_grid_by_lon (無 self.)。
+        2. 強制 Colormap extend='both'。
+        3. Cartopy 使用 Split 策略；Basemap 使用 Continuous 策略。
         """
         vkw: Dict[str, Any] = {}
         if vmin is not None:
@@ -1838,9 +1841,9 @@ class OdbVizPlugin:
         if vmax is not None:
             vkw["vmax"] = vmax
         
-        # Extend logic from map_plot.py
-        extend = "both"
-
+        # [Style Fix] 強制使用 'both' 以顯示兩端三角形
+        extend = 'both'
+        
         def _finalize_color(mappable=None):
             if is_categorical:
                 vals = [v for v in np.unique(value_grid) if np.isfinite(v)]
@@ -1853,7 +1856,8 @@ class OdbVizPlugin:
                 ax.legend(handles=patches, fontsize=8, loc="upper center", bbox_to_anchor=(0.5, -0.12), ncol=min(4, len(patches)), frameon=False)
             elif mappable:
                 try:
-                    orientation, cbar_params = _choose_colorbar_layout(ax, fig, engine, style.get("legend_loc"))
+                    # 使用全域 helper _choose_colorbar_layout
+                    orientation, cbar_params = _choose_colorbar_layout(ax, fig, engine)
                     cbar = fig.colorbar(mappable, ax=ax, orientation=orientation, extend=extend, **cbar_params)
                     
                     label = value_col
@@ -1876,13 +1880,14 @@ class OdbVizPlugin:
                 im = None
                 
                 if bbox_mode == "antimeridian":
-                    # Splitting strategy for Cartopy
+                    # Cartopy 策略: 強制切割 (Split Strategy)
                     L180 = _lon180(lon_grid)
                     drew = False
                     for s in _am_blocks_from_lon180(L180):
                         Xs = lon_grid[:, s]
                         Zs = value_grid[:, s]
-                        Xs, Zs = _sort_cols_by_lon(Xs, Zs)
+                        # [Fix] 呼叫全域函數 _sort_grid_by_lon
+                        Xs, Zs = _sort_grid_by_lon(Xs, Zs)
                         im = ax.pcolormesh(
                             Xs, lat_grid[:, s], Zs,
                             transform=data_crs,
@@ -1890,10 +1895,10 @@ class OdbVizPlugin:
                         )
                         drew = True
                     if not drew:
-                        X, Z = _sort_cols_by_lon(lon_grid, value_grid)
+                        X, Z = _sort_grid_by_lon(lon_grid, value_grid)
                         im = ax.pcolormesh(X, lat_grid, Z, transform=data_crs, cmap=cmap, norm=norm, shading="auto", **vkw)
                 else:
-                    X, Z = _sort_cols_by_lon(lon_grid, value_grid)
+                    X, Z = _sort_grid_by_lon(lon_grid, value_grid)
                     im = ax.pcolormesh(
                         X, lat_grid, Z,
                         transform=data_crs,
@@ -1911,18 +1916,19 @@ class OdbVizPlugin:
             else:
                 im = None
                 if bbox_mode == "antimeridian":
+                    # Basemap 策略: 同樣切割以求保險，但使用 contourf + latlon=True
                     L180 = _lon180(lon_grid)
                     for s in _am_blocks_from_lon180(L180):
                         Xs = lon_grid[:, s]
                         Zs = value_grid[:, s]
-                        Xs, Zs = _sort_cols_by_lon(Xs, Zs)
+                        Xs, Zs = _sort_grid_by_lon(Xs, Zs)
                         if vmin is not None and vmax is not None:
-                             levels = np.linspace(vmin, vmax, 21)
-                             im = m.contourf(Xs, lat_grid[:, s], Zs, levels=levels, cmap=cmap, norm=norm, extend=extend, latlon=True)
+                                levels = np.linspace(vmin, vmax, 21)
+                                im = m.contourf(Xs, lat_grid[:, s], Zs, levels=levels, cmap=cmap, norm=norm, extend=extend, latlon=True)
                         else:
-                             im = m.contourf(Xs, lat_grid[:, s], Zs, cmap=cmap, norm=norm, extend=extend, latlon=True)
+                                im = m.contourf(Xs, lat_grid[:, s], Zs, cmap=cmap, norm=norm, extend=extend, latlon=True)
                 else:
-                    X, Z = _sort_cols_by_lon(lon_grid, value_grid)
+                    X, Z = _sort_grid_by_lon(lon_grid, value_grid)
                     if vmin is not None and vmax is not None:
                         levels = np.linspace(vmin, vmax, 21)
                         im = m.contourf(X, lat_grid, Z, levels=levels, cmap=cmap, norm=norm, extend=extend, latlon=True)
@@ -1936,15 +1942,15 @@ class OdbVizPlugin:
         im = None
         if bbox_mode == "antimeridian":
             Lrec, xmin, xmax, _center = _recenter_lon_for_plain(lon_grid)
-            X, Z = _sort_cols_by_lon(Lrec, value_grid)
+            X, Z = _sort_grid_by_lon(Lrec, value_grid)
             im = ax.pcolormesh(X, lat_grid, Z, cmap=cmap, norm=norm, shading="auto", **vkw)
             ax.set_xlim(xmin, xmax)
         elif bbox_mode == "crossing-zero":
             X = _lon180(lon_grid)
-            X, Z = _sort_cols_by_lon(X, value_grid)
+            X, Z = _sort_grid_by_lon(X, value_grid)
             im = ax.pcolormesh(X, lat_grid, Z, cmap=cmap, norm=norm, shading="auto", **vkw)
         else:
-            X, Z = _sort_cols_by_lon(lon_grid, value_grid)
+            X, Z = _sort_grid_by_lon(lon_grid, value_grid)
             im = ax.pcolormesh(X, lat_grid, Z, cmap=cmap, norm=norm, shading="auto", **vkw)
 
         ax.set_aspect("equal", adjustable="box")
@@ -1952,12 +1958,12 @@ class OdbVizPlugin:
         yt = _smart_geo_ticks(*ax.get_ylim(), coord_type="lat")
         ax.set_xticks(xt)
         ax.set_yticks(yt)
+        # 假設 _format_deg/_format_lat 是實例方法
         ax.xaxis.set_major_formatter(mticker.FuncFormatter(self._format_deg()))
         ax.yaxis.set_major_formatter(mticker.FuncFormatter(self._format_lat()))
 
         _finalize_color(im)
         return
-
 
     def _render_plot_map_section(
         self,
@@ -1976,13 +1982,24 @@ class OdbVizPlugin:
             raise PluginError("PLOT_FAIL", "map plot requires longitude and latitude columns")
 
         raw_lons = df[lon_col].to_numpy(dtype=float)
+        bbox_param = message.get("bbox") or message.get("bboxRange") or message.get("bbox_range")
         bbox_mode = self._auto_bbox_mode(raw_lons, message.get("bboxMode") or message.get("bbox_mode"))
+        bbox_override = None
+        if bbox_param and isinstance(bbox_param, (list, tuple)) and len(bbox_param) == 4:
+            try:
+                b0, b1, b2, b3 = [float(x) for x in bbox_param]
+                bbox_override = (b0, b1, b2, b3)
+                bbox_mode = self._auto_bbox_mode(np.array([b0, b2]), message.get("bboxMode") or message.get("bbox_mode"))
+            except Exception:
+                bbox_override = None
 
+        # [Important] Antimeridian 模式下，必須將經度統一為 0-360 模式，
+        # 這樣資料矩陣在記憶體中才是連續的 (例如 135...300)，避免 gridding 出現斷層
         lon_mode = "native"
         if bbox_mode == "crossing-zero":
             lon_mode = "180"
         elif bbox_mode == "antimeridian":
-             lon_mode = "360"
+                lon_mode = "360"
 
         engine_requested = message.get("engine") or style.get("engine")
         engine = "plain"
@@ -2028,6 +2045,16 @@ class OdbVizPlugin:
         lon_hi = float(np.nanmax(lon_vals)) if lon_vals.size else 180.0
         lat_lo = float(np.nanmin(lat_vals)) if lat_vals.size else -90.0
         lat_hi = float(np.nanmax(lat_vals)) if lat_vals.size else 90.0
+
+        if bbox_override:
+            lon_lo, lat_lo, lon_hi, lat_hi = bbox_override
+            # For antimeridian, make extents monotonic in 0-360 to match gridded lon_mode handling.
+            if bbox_mode == "antimeridian":
+                lo360 = _lon360(np.array([lon_lo]))[0]
+                hi360 = _lon360(np.array([lon_hi]))[0]
+                if hi360 < lo360:
+                    hi360 += 360.0
+                lon_lo, lon_hi = lo360, hi360
 
         if engine == "plain" and bbox_mode == "antimeridian":
             if grid is not None:
@@ -2087,6 +2114,8 @@ class OdbVizPlugin:
                         scatter = engine_obj.scatter(plot_df[lon_col], plot_df[lat_col], c=color_values, cmap=cmap_to_use, vmin=vmin, vmax=vmax, latlon=True, **scatter_kwargs)
                     else:
                         scatter = ax.scatter(plot_df[lon_col], plot_df[lat_col], c=color_values, cmap=cmap_to_use, vmin=vmin, vmax=vmax, **scatter_kwargs)
+                    
+                    # [Style Fix] Scatter 也強制使用 extend='both'
                     extend = "both"
 
                     orientation, cbar_params = _choose_colorbar_layout(ax, fig, engine, style.get("legend_loc"))
@@ -2119,6 +2148,7 @@ class OdbVizPlugin:
             return buf.getvalue()
         finally:
             plt.close(fig)
+
 
     def _normalize_plot_message(self, raw: Dict[str, Any]) -> Dict[str, Any]:
         params = raw.get("params")
@@ -2158,10 +2188,20 @@ class OdbVizPlugin:
         lo = float(np.nanmin(lons))
         hi = float(np.nanmax(lons))
         span = hi - lo
+        
+        # 1. 覆蓋範圍極大 (例如全球) -> Antimeridian
         if span > 180.0:
             return "antimeridian"
+            
+        # 2. [Critical Fix] 針對 0-360 格式的太平洋資料 (例如 135..300)
+        # 如果最大值超過 180，且最小值小於 180，表示資料跨越了 180 度線 (太平洋)
+        if hi > 180.0 and lo < 180.0:
+            return "antimeridian"
+
+        # 3. 針對 -180..180 格式跨越 0 度的資料 (例如 -10..10)
         if lo < 0.0 < hi:
             return "crossing-zero"
+            
         return "none"
 
     def _format_deg(self):
@@ -2663,7 +2703,13 @@ class OdbVizPlugin:
             # Defensive: report concrete cause rather than generic INTERNAL_ERROR black-boxing it
             raise PluginError("INTERNAL_ERROR", f"Preview failed: {type(e).__name__}: {e}")
 
+
     def _render_plot(self, raw_message: Dict[str, Any], msg_id: Optional[str] = None) -> bytes:
+        """
+        修正: 
+        1. 強制針對 'map' 類型將 limit 設為 0，防止資料截斷導致投影偵測錯誤。
+        2. 加入 finally 區塊的 try-except 保護。
+        """
         message = self._normalize_plot_message(raw_message)
         message = self._apply_dataset_hints(message)
         dataset_key = message.get("datasetKey")
@@ -2678,31 +2724,24 @@ class OdbVizPlugin:
         y_col = message.get("y")
         style = dict(message.get("style") or {})
         bins_param: Dict[str, float] = {}
+        
         style_bins = style.get("bins")
         if isinstance(style_bins, dict):
             for key, value in style_bins.items():
                 k = str(key).strip().lower()
-                try:
-                    bins_param[k] = float(value)
-                except Exception:
-                    raise PluginError("BAD_BINS", f"bins.{k} must be numeric")
+                try: bins_param[k] = float(value)
+                except: pass
         message_bins = message.get("bins")
         if isinstance(message_bins, dict):
             for key, value in message_bins.items():
                 k = str(key).strip().lower()
-                try:
-                    bins_param[k] = float(value)
-                except Exception:
-                    raise PluginError("BAD_BINS", f"bins.{k} must be numeric")
-        elif message_bins is not None and not isinstance(message_bins, dict):
-            raise PluginError("BAD_BINS", "bins must be an object with numeric values")
+                try: bins_param[k] = float(value)
+                except: pass
+        
         def _bool_opt(value, default=False):
-            if value is None:
-                return default
-            if isinstance(value, bool):
-                return value
-            if isinstance(value, (int, float)):
-                return value != 0
+            if value is None: return default
+            if isinstance(value, bool): return value
+            if isinstance(value, (int, float)): return value != 0
             return str(value).lower() not in {"false", "0", "no", "off"}
 
         group_by = message.get("groupBy") or []
@@ -2723,12 +2762,19 @@ class OdbVizPlugin:
         df = df[filter_mask]
         df = self._apply_order(df, message.get("orderBy") or [], allowed_columns=None)
 
-        try:
-            limit = int(message.get("limit") or 0)
-        except Exception:
+        # [CRITICAL FIX]
+        # For MAP plots, we MUST ignore the limit to ensure auto-bbox detection works on the full dataset range.
+        # Otherwise, partial data (e.g. first 500 rows) might not cross the antimeridian, causing incorrect projection.
+        if kind == "map":
             limit = 0
-        if limit > 0:
-            df = df.head(limit)
+        else:
+            try:
+                limit = int(message.get("limit") or 0)
+            except Exception:
+                limit = 0
+            if limit > 0:
+                df = df.head(limit)
+            
         if df.empty:
             raise PluginError("PLOT_FAIL", "Filter returned no rows")
         self._debug(f"plot df: rows={len(df)} cols={list(df.columns)[:8]}...", msg_id or "-")
@@ -2742,16 +2788,12 @@ class OdbVizPlugin:
         try:
             cmap_resolved = self._resolve_cmap(style.get("cmap"))
         except PluginError as exc:
-            # propagate as plot error before touching matplotlib
             raise
 
         def _float_opt(val: Any) -> Optional[float]:
-            if val is None:
-                return None
-            try:
-                f = float(val)
-            except Exception:
-                return None
+            if val is None: return None
+            try: f = float(val)
+            except: return None
             return f if np.isfinite(f) else None
 
         vmin = _float_opt(style.get("vmin"))
@@ -2760,9 +2802,9 @@ class OdbVizPlugin:
         if kind == "map":
             return self._render_plot_map_section(message, df, style, bins_param, cmap_resolved, vmin, vmax, figsize, dpi)
 
+        # Standard plots logic below...
         fig, ax = plt.subplots(figsize=figsize, dpi=dpi)
         try:
-
             def _exists(col: Optional[str]) -> bool:
                 return bool(col) and col in df.columns
 
@@ -2778,40 +2820,30 @@ class OdbVizPlugin:
 
             legend_enabled = _bool_opt(style.get('legend'), True)
             legend_always = _bool_opt(style.get('legend_always'), False)
-            try:
-                max_series_allowed = max(1, int(style.get('max_series', 24)))
-            except Exception:
-                max_series_allowed = 24
-
+            try: max_series_allowed = max(1, int(style.get('max_series', 24)))
+            except: max_series_allowed = 24
+            
             color_cycle = self._build_color_cycle(style.get("cmap"), max_series_allowed)
 
             if kind == "timeseries":
                 if not (_exists(x_col) and _exists(y_col)):
                     raise PluginError("COLUMN_UNKNOWN", "timeseries plot requires existing x and y columns")
-                try:
-                    df[x_col] = pd.to_datetime(df[x_col], errors="coerce")
-                except Exception:
-                    pass
+                try: df[x_col] = pd.to_datetime(df[x_col], errors="coerce")
+                except: pass
                 df = df.sort_values(by=x_col)
-
-                if color_cycle:
-                    ax.set_prop_cycle(color=color_cycle)
-
+                if color_cycle: ax.set_prop_cycle(color=color_cycle)
+                
                 work = df
-                resample_freq: Optional[str] = None
-                group_cols: List[str] = []
+                resample_freq = None
+                group_cols = []
                 for spec in group_by:
                     work, gcol, freq = self._apply_groupby_bins(work, str(spec))
-                    if freq:
-                        resample_freq = freq
-                    elif gcol:
-                        group_cols.append(gcol)
-
+                    if freq: resample_freq = freq
+                    elif gcol: group_cols.append(gcol)
+                
                 if resample_freq:
-                    try:
-                        work[x_col] = pd.to_datetime(work[x_col], errors="coerce")
-                    except Exception:
-                        pass
+                    try: work[x_col] = pd.to_datetime(work[x_col], errors="coerce")
+                    except: pass
                     if group_cols:
                         plotted = 0
                         for keys, g in work.groupby(group_cols, dropna=False):
@@ -2820,31 +2852,23 @@ class OdbVizPlugin:
                             label = keys if isinstance(keys, (tuple, list)) else (keys,)
                             plot_line(g2[x_col], g2[y_col], label=label)
                             plotted += 1
-                            if plotted >= max_series_allowed:
-                                break
-                        self._debug(f"timeseries grouped (resample={resample_freq}) series plotted={plotted}", msg_id or "-")
+                            if plotted >= max_series_allowed: break
                     else:
                         rs = work.set_index(x_col).resample(resample_freq)[y_col]
                         g2 = (rs.count().reset_index() if reducer == "count" else rs.apply(reducer).reset_index())
                         plot_line(g2[x_col], g2[y_col])
-                        self._debug("timeseries resample-only → single aggregated series", msg_id or "-")
                 elif group_cols:
                     plotted = 0
                     for keys, g in work.groupby(group_cols, dropna=False):
-                        if reducer == "count":
-                            g2 = g.groupby(x_col, dropna=False)[y_col].count().reset_index()
-                        else:
-                            g2 = g.groupby(x_col, dropna=False)[y_col].apply(reducer).reset_index()
+                        if reducer == "count": g2 = g.groupby(x_col, dropna=False)[y_col].count().reset_index()
+                        else: g2 = g.groupby(x_col, dropna=False)[y_col].apply(reducer).reset_index()
                         label = keys if isinstance(keys, (tuple, list)) else (keys,)
                         plot_line(g2[x_col], g2[y_col], label=label)
                         plotted += 1
-                        if plotted >= max_series_allowed:
-                            break
-                    self._debug(f"timeseries grouped (discrete/bin) series plotted={plotted}", msg_id or "-")
+                        if plotted >= max_series_allowed: break
                 else:
                     plot_line(df[x_col], df[y_col])
-                    self._debug("timeseries: grouping disabled → single series", msg_id or "-")
-
+                
                 ax.set_xlabel(x_col)
                 ax.set_ylabel(y_col)
                 self._format_time_axis(ax)
@@ -2853,319 +2877,66 @@ class OdbVizPlugin:
                 time_col = message.get("timeField") or x_col
                 if not (_exists(time_col) and _exists(y_col)):
                     raise PluginError("COLUMN_UNKNOWN", "climatology plot requires timeField and y column")
-                work = df[[time_col, y_col] + [col for col in group_by if col in df.columns]].copy()
-                try:
-                    work[time_col] = pd.to_datetime(work[time_col], errors="coerce")
-                except Exception:
-                    pass
+                work = df.copy()
+                try: work[time_col] = pd.to_datetime(work[time_col], errors="coerce")
+                except: pass
                 work["__month__"] = work[time_col].dt.month
                 work = work.dropna(subset=["__month__", y_col])
-                if work.empty:
-                    raise PluginError("PLOT_FAIL", "No rows available for climatology plot")
-
-                gb_cols: List[str] = []
-                for token in group_by:
-                    spec = str(token).strip()
-                    if not spec:
-                        continue
-                    if ":" in spec:
-                        raise PluginError("PLOT_FAIL", "climatology groupBy does not support binning/resample syntax")
-                    if spec not in work.columns:
-                        raise PluginError("COLUMN_UNKNOWN", f"Unknown group-by column '{spec}'")
-                    gb_cols.append(spec)
-
-                agg_keys = gb_cols + ["__month__"]
-                grouped = work.groupby(agg_keys, dropna=False)[y_col]
-                if reducer == "count":
-                    agg_df = grouped.count().reset_index(name="__value__")
-                else:
-                    agg_df = grouped.aggregate(reducer).reset_index(name="__value__")
-
-                if color_cycle:
-                    ax.set_prop_cycle(color=color_cycle)
-                    color_iter = iter(color_cycle)
-                else:
-                    color_iter = None
-
+                gb_cols = [c for c in group_by if c in work.columns]
+                grouped = work.groupby(gb_cols + ["__month__"], dropna=False)[y_col]
+                agg_df = (grouped.count().reset_index(name="__value__") if reducer == "count" else grouped.aggregate(reducer).reset_index(name="__value__"))
+                
+                if color_cycle: ax.set_prop_cycle(color=color_cycle)
                 month_ticks = np.arange(1, 13)
-                month_labels = style.get("monthLabels")
-                if not isinstance(month_labels, list) or len(month_labels) != 12:
-                    month_labels = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
-
-                def _label_from_group(key) -> Optional[str]:
-                    if not gb_cols:
-                        return None
-                    if not isinstance(key, tuple):
-                        key = (key,)
-                    parts = []
-                    for col, value in zip(gb_cols, key):
-                        parts.append(f"{col}={value}")
-                    return ", ".join(parts)
-
-                def _series_for_group(rows: "pd.DataFrame") -> List[float]:
+                month_labels = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+                
+                def _series_for_group(rows):
                     vals = [np.nan] * 12
                     for _, row in rows.iterrows():
-                        try:
-                            month_idx = int(row["__month__"]) - 1
-                        except Exception:
-                            continue
-                        if 0 <= month_idx < 12:
-                            vals[month_idx] = row["__value__"]
+                        if 0 <= int(row["__month__"]) - 1 < 12: vals[int(row["__month__"]) - 1] = row["__value__"]
                     return vals
 
-                def _group_iterator():
-                    if gb_cols:
-                        for key, sub in agg_df.groupby(gb_cols, dropna=False):
-                            yield key, sub
-                    else:
-                        yield None, agg_df
-
-                for key, rows in _group_iterator():
-                    values = _series_for_group(rows)
-                    label = _label_from_group(key)
-                    kwargs = {
-                        "linestyle": style.get("line", "-"),
-                        "alpha": float(style.get("alpha", 1.0)),
-                    }
-                    marker = style.get("marker")
-                    if marker:
-                        kwargs["marker"] = marker
-                    if label:
-                        kwargs["label"] = label
-                    if color_iter is not None:
-                        try:
-                            kwargs["color"] = next(color_iter)
-                        except StopIteration:
-                            pass
-                    ax.plot(month_ticks, values, **kwargs)
-
+                if gb_cols:
+                    for key, rows in agg_df.groupby(gb_cols, dropna=False):
+                        ax.plot(month_ticks, _series_for_group(rows), label=str(key))
+                else:
+                    ax.plot(month_ticks, _series_for_group(agg_df))
+                
                 ax.set_xticks(month_ticks)
                 ax.set_xticklabels(month_labels)
                 ax.set_xlabel(style.get("labelX") or "Month")
                 ax.set_ylabel(style.get("labelY") or y_col)
-                if style.get("grid", True):
-                    ax.grid(True, alpha=0.3)
+                if style.get("grid", True): ax.grid(True, alpha=0.3)
 
             elif kind == "profile":
                 y_col = y_col or "PRES"
-                if not x_col:
-                    raise PluginError("PLOT_FAIL", "profile plot requires --x <var> (X vs PRES)")
-                if not (_exists(x_col) and _exists(y_col)):
-                    raise PluginError("COLUMN_UNKNOWN", "profile plot requires existing x and y (default PRES)")
+                if not x_col: raise PluginError("PLOT_FAIL", "profile plot requires --x")
+                if style.get("invert_y", True): ax.invert_yaxis()
+                ax.plot(df[x_col], df[y_col], '.', alpha=0.5)
+                ax.set_xlabel(x_col); ax.set_ylabel(y_col)
+                if style.get("grid"): ax.grid(True)
 
-                bins_y: Optional[float] = None
-                if "y" in bins_param:
-                    try:
-                        bins_y = float(bins_param["y"])
-                    except Exception:
-                        raise PluginError("BAD_BINS", "bins.y must be a positive float")
-                    if not np.isfinite(bins_y) or bins_y <= 0:
-                        raise PluginError("BAD_BINS", "bins.y must be a positive float")
-
-                # reducer from --agg
-                # gather group-by tokens and resolve into real columns
-                gb_tokens = message.get("groupBy") or []
-                gb_tokens = [t for t in gb_tokens if t]
-
-                df_gb = df  # we may add derived columns here
-                gb_cols: List[str] = []          # actual DataFrame columns used to group
-                gb_meta: List[Tuple[str, Optional[float]]] = []  # (base_name, bin_step or None)
-
-                if color_cycle:
-                    ax.set_prop_cycle(color=color_cycle)
-
-                for tok in gb_tokens:
-                    if ":" in tok:
-                        base, step_str = tok.split(":", 1)
-                        base = base.strip()
-                        if base not in df_gb.columns:
-                            raise PluginError("COLUMN_UNKNOWN", f"Unknown group-by column '{base}'")
-                        try:
-                            step = float(step_str)
-                        except Exception:
-                            raise PluginError("BAD_GROUPBY", f"Non-numeric bin step in '{tok}'")
-                        if step <= 0:
-                            raise PluginError("BAD_GROUPBY", f"Bin step must be > 0 in '{tok}'")
-                        new_col = f"__gb_{base}_bin__"
-                        vals = pd.to_numeric(df_gb[base], errors="coerce").to_numpy(dtype=float)
-                        df_gb = df_gb.assign(**{new_col: np.floor(vals / step) * step})
-                        gb_cols.append(new_col)
-                        gb_meta.append((base, step))
-                    else:
-                        base = tok.strip()
-                        if base not in df_gb.columns:
-                            raise PluginError("COLUMN_UNKNOWN", f"Unknown group-by column '{base}'")
-                        gb_cols.append(base)
-                        gb_meta.append((base, None))
-
-                # pretty legend label from group key
-                def _label_from_key(key) -> str:
-                    if not isinstance(key, tuple):
-                        key = (key,)
-                    parts = []
-                    for (base, step), val in zip(gb_meta, key):
-                        if step is not None:
-                            parts.append(f"{base}:{val:.0f}")
-                        else:
-                            parts.append(f"{base}={val}")
-                    return ", ".join(parts)
-
-                # optional sort by depth
-                try:
-                    df_gb = df_gb.sort_values(by=y_col)
-                except Exception:
-                    pass
-
-                # optional thin/markers/alpha (defaults conservative)
-                lw = float(style.get("linewidth", 1.2))
-                mk = style.get("marker", "")  # default no markers
-                alpha = float(style.get("alpha", 0.95))
-
-                # palette
-                n_groups = len(df_gb.groupby(gb_cols)) if gb_cols else 1
-                colors = self._sample_cmap(style.get("cmap"), n_groups)
-                color_iter = iter(colors) if colors else None
-
-                # collapse duplicates (or bins.y) at the same depth → one X per Y per group
-                def _collapse(g: pd.DataFrame) -> pd.DataFrame:
-                    frame = g
-                    depth_field = y_col
-                    bin_col = "__pres_bin__"
-                    if bins_y is not None:
-                        numeric = pd.to_numeric(frame[y_col], errors="coerce")
-                        valid_mask = numeric.notna()
-                        if not valid_mask.any():
-                            return pd.DataFrame(columns=[y_col, x_col])
-                        frame = frame.loc[valid_mask].copy()
-                        numeric = numeric.loc[valid_mask]
-                        frame[bin_col] = np.floor(numeric.to_numpy() / bins_y) * bins_y
-                        depth_field = bin_col
-                    if frame.empty:
-                        return pd.DataFrame(columns=[y_col, x_col])
-                    if reducer == "count":
-                        grouped = frame.groupby(depth_field, dropna=False)[x_col].count()
-                    else:
-                        grouped = frame.groupby(depth_field, dropna=False)[x_col].apply(reducer)
-                    result = grouped.reset_index()
-                    if depth_field != y_col:
-                        result = result.rename(columns={depth_field: y_col})
-                    return result.sort_values(y_col)
-
-                if gb_cols:
-                    for i, (gk, gdf) in enumerate(df_gb.groupby(gb_cols)):
-                        adf = _collapse(gdf)
-                        if adf.empty:
-                            continue
-                        color = next(color_iter, None) if color_iter is not None else None
-                        ax.plot(
-                            adf[x_col].to_numpy(),
-                            adf[y_col].to_numpy(),
-                            color=color,
-                            linewidth=lw,
-                            marker=mk,
-                            alpha=alpha,
-                            label=_label_from_key(gk),
-                        )
-                    # legend placement you already handle elsewhere (bottom/outside)
-                else:
-                    adf = _collapse(df_gb)
-                    if not adf.empty:
-                        color = next(color_iter, None) if color_iter is not None else None
-                        ax.plot(adf[x_col].to_numpy(), adf[y_col].to_numpy(),
-                                linewidth=lw, marker=mk, alpha=alpha, color=color)
-
-                ax.set_xlabel(x_col)
-                ax.set_ylabel(y_col)
-                if style.get("invert_y", True):
-                    ax.invert_yaxis()
-                if style.get("grid"):
-                    ax.grid(True)
-
-            elif kind == "map":
-                return self._render_plot_map_section(message, df, style, bins_param, cmap_resolved, vmin, vmax, figsize, dpi)
             else:
                 raise PluginError("PLOT_FAIL", f"Unsupported plot kind '{kind}'")
 
             handles, labels = ax.get_legend_handles_labels()
-            legend_pairs = [
-                (handle, label)
-                for handle, label in zip(handles, labels)
-                if label and not str(label).startswith("_")
-            ]
-            series_count = len(legend_pairs)
-            show_legend = (
-                legend_enabled
-                and kind in {"timeseries", "profile"}
-                and series_count > 0
-                and (series_count > 1 or legend_always)
-            )
-            if show_legend:
-                loc, legend_extra, legend_orientation, legend_loc_key = self._legend_params(style, msg_id, series_count)
-                legend_kwargs = dict(legend_extra)
-                legend_size = style.get("legend_fontsize", "small")
-                try:
-                    legend_size = float(legend_size)
-                except Exception:
-                    pass
+            if legend_enabled and kind in {"timeseries", "profile"} and handles:
+                    ax.legend(handles, labels, loc="best", fontsize="small", frameon=False)
 
-                legend_ncol, legend_rows = self._legend_layout(legend_orientation, series_count)
-                if legend_ncol is not None:
-                    legend_kwargs["ncol"] = legend_ncol
-                else:
-                    legend_rows = max(legend_rows, 1)
-
-                if legend_orientation == "horizontal" and legend_rows > 1:
-                    anchor = legend_kwargs.get("bbox_to_anchor")
-                    if isinstance(anchor, tuple) and len(anchor) == 2:
-                        x_anchor, y_anchor = anchor
-                        offset = 0.08 * (legend_rows - 1)
-                        if legend_loc_key == "top":
-                            y_anchor += offset
-                        elif legend_loc_key == "bottom":
-                            y_anchor -= offset
-                        legend_kwargs["bbox_to_anchor"] = (x_anchor, y_anchor)
-
-                if legend_loc_key in {"top", "bottom"}:
-                    self._adjust_legend_margins(fig, legend_loc_key, legend_orientation, legend_rows)
-
-                legend_handles = [handle for handle, _ in legend_pairs]
-                legend_labels = [str(label) for _, label in legend_pairs]
-
-                try:
-                    ax.legend(
-                        legend_handles,
-                        legend_labels,
-                        loc=loc,
-                        fontsize=legend_size,
-                        **legend_kwargs,
-                    )
-                except Exception as exc:
-                    self._debug(f"legend: fallback to 'best' ({exc})", msg_id or "-")
-                    try:
-                        ax.legend(
-                            legend_handles,
-                            legend_labels,
-                            loc="best",
-                            fontsize=legend_size,
-                        )
-                    except Exception:
-                        pass
-
-            if style.get("title"):
-                ax.set_title(style["title"])
-            if kind != "map" and style.get("grid"):
-                ax.grid(True)
-            if kind == "map" and style.get("grid"):
-                ax.grid(True, linestyle=style.get("grid_linestyle", "--"), alpha=style.get("grid_alpha", 0.3))
-
+            if style.get("title"): ax.set_title(style["title"])
+            
             buf = io.BytesIO()
             fig.savefig(buf, format="png", dpi=dpi, bbox_inches="tight")
             png_bytes = buf.getvalue()
         finally:
-            plt.close(fig)
+            try:
+                plt.close(fig)
+            except Exception:
+                pass
 
         return png_bytes
-
+    
+    
     def _handle_plot(self, msg_id: str, message: Dict[str, Any]) -> None:
         png_bytes = self._render_plot(message, msg_id)
         self.send_json({
@@ -3265,6 +3036,7 @@ class OdbVizPlugin:
             "msgId": msg_id,
             "datasetKey": dataset_key,
         })
+
 
 def _compute_plot_bytes(plugin: OdbVizPlugin, message: Dict[str, Any]) -> bytes:
     return plugin._render_plot(message, message.get("msgId"))

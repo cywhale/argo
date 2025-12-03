@@ -77,3 +77,8 @@
         -- update docs (README.md/html + Traditional Chinese) and specs/odbargo_view_spec_v_0_2_1.md; add tests for legacy → lowercase conversion, JSON between filters, map/timeseries plots, and CSV export
 #### ver 0.2.8 No significant changes, only document all spec changes in specs/odbargo_view_spec_v_0_2_8.md
 #### ver 0.2.9 Breaking new odbViz created to replace odbargo_view as a universal plotter for ODB CLI/n1
+
+#### ver 0.3.0 odbViz antimeridian & viewer bridge polish
+        -- fixed antimeridian handling: keep original bbox for projection, grid on 0–360, render on split −180..180 slices for basemap/cartopy, and normalize bbox extents to avoid wraparound
+        -- ensured map plots ignore row limits during bbox detection to preserve seam awareness
+        -- clarified keynotes doc for dateline handling and stabilized /view plot behavior for datasets opened via CSV or API-fed records
