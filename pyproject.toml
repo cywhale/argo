@@ -35,6 +35,11 @@ odbargo-view = "odbViz.plugin:main"
 [tool.hatch.build.targets.wheel]
 packages = ["cli", "odbViz"]
 
+[dependency-groups]
+dev = [
+    "pyinstaller>=6.18.0",
+]
+
 # If you plan to include additional subpackages under these, use pattern find:
 # [tool.setuptools.packages.find]
 # include = ["cli*", "odbargo_view*"]
