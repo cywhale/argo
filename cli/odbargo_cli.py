@@ -59,7 +59,10 @@ async def download_with_retry(wmo_list: List[int], output_path: str, retries: in
             return await asyncio.to_thread(download_argo_data, wmo_list, output_path, insecure=force_insecure)
         except Exception as exc:
             print(f"⚠️ Attempt {attempt + 1} failed: {exc}")
-            if "SSL error" in str(exc) and attempt == 0:
+            #if "SSL error" in str(exc) and attempt == 0:
+            err_msg = str(exc)
+            if ("SSL" in err_msg or "certificate" in err_msg.lower()) and attempt == 0:
+                print("💡 Detecting SSL issue, switching to INSECURE mode for retry...") # 增加提示
                 force_insecure = True
             if attempt < retries - 1:
                 print(f"⏳ Retrying in {delay} seconds…")
