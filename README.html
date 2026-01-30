@@ -13,7 +13,7 @@
 <h2 id="introduction">Introduction</h2>
 <p><code>odbargo-cli</code> is a lightweight command-line tool designed to download Biogeochemical (BGC) Argo float data (NetCDF) from the <a href="https://erddap.ifremer.fr/erddap/index.html">ERDDAP</a> server.
 It is developed by <a href="https://www.odb.ntu.edu.tw/" target="_blank">ODB</a> as a Argo plugin in ODB <a href="https://api.odb.ntu.edu.tw/hub/" target="_blank">Ocean APIverse</a>, and also supports standalone interactive use.  Visit it for more <a href="https://api.odb.ntu.edu.tw/hub/?help=Argo">details</a> about the integration with Ocean APIverse . </p>
-<p>We also provide a <strong>new optional viewer module</strong> (<code>odbargo-view</code>) that lets you preview, filter, plot, and export data directly from the CLI using <code>/view ...</code> commands. The viewer is <strong>not</strong> shipped as an executable to keep downloads small; install it from the source archive when needed (see <strong>Add the viewer</strong> below). Full usage is documented in <a href="https://github.com/cywhale/argo/blob/main/README_odbargo-view.md" target="_blank">README_odbargo-view</a>.</p>
+<p>We also provide a <strong>new optional viewer module</strong> (<code>odbargo-view</code>) that lets you preview, filter, plot, and export data directly from the CLI using <code>/view ...</code> commands. The viewer implementation now lives in <code>odbViz</code> but keeps the same install/command name for compatibility. The viewer is <strong>not</strong> shipped as an executable to keep downloads small; install it from the source archive when needed (see <strong>Add the viewer</strong> below). Full usage is documented in <a href="https://github.com/cywhale/argo/blob/main/README_odbargo-view.md" target="_blank">README_odbargo-view</a>.</p>
 <hr>
 <h2 id="usage">Usage</h2>
 <h3 id="1-download">1. Download</h3>
@@ -22,6 +22,7 @@ It is developed by <a href="https://www.odb.ntu.edu.tw/" target="_blank">ODB</a>
 <li><strong>Use prebuilt binaries</strong> (if available for your platform):  <ul>
 <li>Windows: <a href="https://github.com/cywhale/argo/blob/main/dist/win_cli/odbargo-cli.exe" target="_blank"><code>odbargo-cli.exe</code></a></li>
 <li>Linux: <a href="https://github.com/cywhale/argo/blob/main/dist/linux_cli/odbargo-cli" target="_blank"><code>odbargo-cli</code></a></li>
+<li>macOS: <a href="https://github.com/cywhale/argo/blob/main/dist/mac_cli/odbargo-cli" target="_blank"><code>odbargo-cli</code></a></li>
 </ul>
 </li>
 <li><p><strong>Add the viewer</strong> (from source archive):</p>

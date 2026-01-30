@@ -2,7 +2,7 @@
 
 ## 導覽
 
-`odbargo-view` 是 `odbargo-cli` 資料檢視擴充模組，透過 `/view ...` 指令即可在命令列開啟、預覽、篩選、繪圖並匯出 Argo NetCDF 資料。
+`odbargo-view` 是 `odbargo-cli` 資料檢視擴充模組，透過 `/view ...` 指令即可在命令列開啟、預覽、篩選、繪圖並匯出 Argo NetCDF 資料。檢視器實作已改為 `odbViz`，但安裝與指令名稱維持相容。
 
 * **為何選配(optional)？** 為了讓主要 CLI （下載Argo資料檔主功能）保持精簡。而資料檢視模組帶有 xarray / h5py / matplotlib 等較大的套件，需要時再安裝即可。
 * **未提供獨立執行檔。** 安裝原始套件後，CLI 會自動以 *module mode* 啟動檢視服務。
@@ -14,7 +14,7 @@
 可從主專案的原始壓縮檔安裝（詳見 [README: odbargo-cli](https://github.com/cywhale/argo/blob/main/README_tw.md)）：
 
 ```bash
-pip install odbargo-0.x.y.tar.gz
+pip install "odbargo-0.x.y.tar.gz[view]"
 ```
 
 完成後執行 `odbargo-cli`，輸入 `/view ...` 指令，檢視模組便會自動啟動。

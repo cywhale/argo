@@ -13,7 +13,7 @@ We also provide a **new optional viewer module** (`odbargo-view`) that lets you 
 ## Contents
 
 - `odbargo-cli` — the downloader + single-port WS bridge.
-- `odbargo-view` — the viewer plugin (deps: xarray/matplotlib/h5netcdf/h5py; optional pandas).
+- `odbargo-view` — the viewer plugin (now backed by `odbViz`; deps: xarray/matplotlib/h5netcdf/h5py; optional pandas).
 
 The CLI can run standalone; the viewer is started on demand when you use `/view …`.
 
@@ -28,6 +28,7 @@ We publish **only** the small CLI binaries:
 - **Use prebuilt binaries** (if available for your platform):  
   - Windows: [`odbargo-cli.exe`](https://github.com/cywhale/argo/blob/main/dist/win_cli/odbargo-cli.exe)
   - Linux: [`odbargo-cli`](https://github.com/cywhale/argo/blob/main/dist/linux_cli/odbargo-cli)
+  - macOS: [`odbargo-cli`](https://github.com/cywhale/argo/blob/main/dist/mac_cli/odbargo-cli)
 
 - **Add the viewer** (from source archive):
   - Find a full source archive: [odbargo-0.x.y.tar.gz](https://github.com/cywhale/argo/tree/main/dist)

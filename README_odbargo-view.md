@@ -2,7 +2,7 @@
 
 ## Introduction
 
-`odbargo-view` is an **optional viewer module** for `odbargo-cli` that lets you **open, preview, filter, plot, and export** Argo NetCDF data directly from the CLI using `/view ...` commands.
+`odbargo-view` is an **optional viewer module** for `odbargo-cli` that lets you **open, preview, filter, plot, and export** Argo NetCDF data directly from the CLI using `/view ...` commands. The viewer implementation now lives in `odbViz` but keeps the same install/command name for compatibility.
 
 * **Why optional?** We keep the main CLI tiny. The viewer carries heavy scientific deps (xarray/h5py/matplotlib), so it’s installed only when you need it.
 * **No viewer executable shipped.** Install from the source archive; the CLI will auto‑start it in *module mode*.
@@ -14,7 +14,7 @@
 We ship a source archive that includes the viewer package, as mentioned in [README: odbargo-cli](https://github.com/cywhale/argo/blob/main/README.md):
 
 ```bash
-pip install odbargo-0.x.y.tar.gz
+pip install "odbargo-0.x.y.tar.gz[view]"
 ```
 
 Now, when you run `odbargo-cli` and type a `/view ...` command, the viewer starts automatically.

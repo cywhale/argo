@@ -10,7 +10,7 @@
 ## 內容
 
 - `odbargo-cli`：下載器與單一埠 WebSocket 橋接器。
-- `odbargo-view`：擴充模組（包含其他相依套件：如xarray等）。
+- `odbargo-view`：擴充模組（已改為 `odbViz` 實作，包含其他相依套件：如xarray等）。
 
 CLI 可以獨立使用；需要視覺化時再啟動 viewer。
 
@@ -23,6 +23,7 @@ CLI 可以獨立使用；需要視覺化時再啟動 viewer。
 - **預編譯 CLI**（依平台提供）：
   - Windows：[`odbargo-cli.exe`](https://github.com/cywhale/argo/blob/main/dist/win_cli/odbargo-cli.exe)
   - Linux：[`odbargo-cli`](https://github.com/cywhale/argo/blob/main/dist/linux_cli/odbargo-cli)
+  - macOS：[`odbargo-cli`](https://github.com/cywhale/argo/blob/main/dist/mac_cli/odbargo-cli)
 - **安裝 全部（含  viewer 原始套件）**：自 [dist](https://github.com/cywhale/argo/tree/main/dist) 下載 `odbargo-0.x.y.tar.gz`
 
 ```bash

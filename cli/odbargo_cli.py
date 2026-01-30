@@ -2,7 +2,7 @@
 
 Implements:
 - WebSocket server for download/view workflows (single port).
-- Subprocess bridge to `odbargo_view` plugin via NDJSON.
+- Subprocess bridge to `odbViz` (odbargo-view) plugin via NDJSON.
 - Slash-style CLI commands mapped 1:1 to WS messages.
 """
 
@@ -201,14 +201,14 @@ async def ensure_viewer(self) -> bool:
                 subprocess.Popen([bin_path], env=env,
                                  stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             else:
-                if importlib.util.find_spec("odbargo_view") is None:
+                if importlib.util.find_spec("odbViz") is None:
                     if ODBARGO_DEBUG:
-                        print("[View] ensure_viewer: odbargo_view module not found")
+                        print("[View] ensure_viewer: odbViz module not found")
                     self._viewer_spawn_inflight = False
                     return False
                 if ODBARGO_DEBUG:
-                    print(f"[View] ensure_viewer: launching module 'python -m odbargo_view' with ODBARGO_CLI_WS={ws_url}")
-                subprocess.Popen([sys.executable, "-m", "odbargo_view"], env=env,
+                    print(f"[View] ensure_viewer: launching module 'python -m odbViz' with ODBARGO_CLI_WS={ws_url}")
+                subprocess.Popen([sys.executable, "-m", "odbViz"], env=env,
                                  stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         except Exception as exc:
             if ODBARGO_DEBUG:
@@ -441,7 +441,7 @@ class PluginClient:
                     break
         else:
             if self.mode == "view":
-                candidates.append([sys.executable or "python3", "-m", "odbargo_view"])
+                candidates.append([sys.executable or "python3", "-m", "odbViz"])
 
         for cmd in candidates:
             if not cmd:

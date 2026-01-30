@@ -1,17 +1,16 @@
 # Repository Guidelines
 
 ## Project Structure & Module Organization
-Core CLI sources live in `cli/` (entry points `__main__.py`, `odbargo_cli.py`, and slash-command helpers) while the optional viewer plugin sits in `odbargo_view/`. The FastAPI bridge that powers Ocean APIverse stays under `argo_app/`, with shared defaults in `argo_app/src/config.py`. PyInstaller specs (`cli.spec`, `view.spec`) and entry helpers (`cli_entry.py`, `view_entry.py`) remain at the repo root; outputs land in `dist/`. Supporting artifacts live in `scripts/` (build automation), `conf/` (sample configs), `specs/` (UX references), and `dev/` (notebooks). Tests target CLI behaviors inside `tests/` (`test_slash_commands.py`, `test_plugin_client.py`, `test_wmo_parser.py`).
+Core CLI sources live in `cli/` (entry points `__main__.py`, `odbargo_cli.py`, and slash-command helpers) while the optional viewer plugin sits in `odbViz/` (installed as `odbargo-view`). The FastAPI bridge that powers Ocean APIverse stays under `argo_app/`, with shared defaults in `argo_app/src/config.py`. PyInstaller specs (`cli.spec`, `view.spec`) and entry helpers (`cli_entry.py`, `view_entry.py`) remain at the repo root; outputs land in `dist/`. Supporting artifacts live in `scripts/` (build automation), `conf/` (sample configs), `specs/` (UX references), and `dev/` (notebooks). Tests target CLI behaviors inside `tests/` (`test_slash_commands.py`, `test_plugin_client.py`, `test_wmo_parser.py`).
 
 ## Build, Test, and Development Commands
 ```
-python -m venv .venv && source .venv/bin/activate
-pip install -e .[view]          # editable CLI plus viewer extras
-python cli_entry.py             # run websocket CLI from source
-python view_entry.py            # launch viewer shell
-uvicorn argo_app.app:app --reload --port 8090   # FastAPI service
-python -m pytest                # run suite
-python -m build                 # build wheel/tarball
+uv sync --all-extras --python 3.13
+uv run python cli_entry.py             # run websocket CLI from source
+uv run python view_entry.py            # launch viewer shell
+uv run uvicorn argo_app.app:app --reload --port 8090   # FastAPI service
+uv run python -m pytest                # run suite
+uv run python -m build                 # build wheel/tarball
 ```
 Refresh PyInstaller binaries via `scripts/build_odbargo-cli.sh` (Linux) or the Windows helper under `scripts/win_installer/`.
 

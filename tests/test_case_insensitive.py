@@ -3,7 +3,7 @@ import pytest
 import xarray as xr
 
 from cli.odbargo_cli import ArgoCLIApp
-from odbargo_view.plugin import DatasetStore, OdbArgoViewPlugin, PluginError
+from odbViz.plugin import DatasetStore, OdbArgoViewPlugin, PluginError
 
 
 def test_dataset_store_case_insensitive_renames(tmp_path):

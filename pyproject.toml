@@ -1,13 +1,13 @@
 [build-system]
-requires = ["setuptools>=68", "wheel"]
-build-backend = "setuptools.build_meta"
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
 
 [project]
 name = "odbargo"
-version = "0.2.7"
+version = "0.4.0"
 description = "ODBArgo CLI + viewer (single distribution)"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.10,<3.14"
 dependencies = [
   "websockets>=12.0",
 ]
@@ -22,14 +22,18 @@ view = [
   "numpy>=1.26",
   "pandas>=2.1",
 ]
+map = [
+  "cartopy",
+  "basemap",
+  "basemap-data",
+]
 
 [project.scripts]
 odbargo-cli  = "cli.odbargo_cli:main"
-odbargo-view = "odbargo_view.plugin:main"
+odbargo-view = "odbViz.plugin:main"
 
-[tool.setuptools]
-# Explicitly list the only packages to include
-packages = ["cli", "odbargo_view", "odbViz"]
+[tool.hatch.build.targets.wheel]
+packages = ["cli", "odbViz"]
 
 # If you plan to include additional subpackages under these, use pattern find:
 # [tool.setuptools.packages.find]

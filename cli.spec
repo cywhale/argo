@@ -14,8 +14,9 @@ STRIP    = True
 
 excludes = [
     "matplotlib", "pandas", "xarray", "h5netcdf", "h5py", "scipy",
+    "numpy", "netCDF4", "argopy",
+    "PIL", "pillow", "contourpy", "kiwisolver", "fonttools",
     "tkinter", "PyQt5", "PySide2", "PySide6", "wx",
-    'numpy', 'netCDF4', 'argopy'
 ]
 
 block_cipher = None
@@ -25,7 +26,7 @@ a = Analysis(
     pathex=[os.path.abspath(".")],
     binaries=[],
     datas=[],
-    hiddenimports=[],
+    hiddenimports=["websockets"],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
@@ -57,4 +58,3 @@ exe = EXE(
     version='version.txt',
     icon=['icon.ico']
 )
-

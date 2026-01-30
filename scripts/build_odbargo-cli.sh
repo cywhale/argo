@@ -1,17 +1,44 @@
 #!/bin/bash
+set -euo pipefail
 
-# for linux version
-pyinstaller odbargo-cli.py \
-  --name odbargo-cli \
-  --onefile \
-  --noconfirm \
-  --clean \
-  --log-level=WARN \
-  --hidden-import websockets
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+DIST_DIR="$ROOT_DIR/dist"
+APP_NAME="odbargo-cli"
 
-# for windows version
-pyinstaller odbargo-cli.py --name odbargo-cli.exe --onefile --noconfirm --clean --log-level=WARN --hidden-import websockets --icon=icon.ico --version-file version.txt
+mkdir -p "$DIST_DIR/mac_cli" "$DIST_DIR/linux_cli" "$DIST_DIR/win_cli"
 
-# an alternative version that use nuitka
-python -m nuitka --onefile --output-filename=odbargo-cli --include-module=websockets odbargo-cli.py
+case "$(uname -s)" in
+  Darwin)
+    pyinstaller "$ROOT_DIR/cli.spec"
+    mv -f "$DIST_DIR/$APP_NAME" "$DIST_DIR/mac_cli/$APP_NAME"
+    ;;
+  Linux)
+    pyinstaller "$ROOT_DIR/cli_entry.py" \
+      --name "$APP_NAME" \
+      --onefile \
+      --noconfirm \
+      --clean \
+      --log-level=WARN \
+      --hidden-import websockets
+    mv -f "$DIST_DIR/$APP_NAME" "$DIST_DIR/linux_cli/$APP_NAME"
+    ;;
+  MINGW*|MSYS*|CYGWIN*)
+    pyinstaller "$ROOT_DIR/cli_entry.py" \
+      --name "$APP_NAME.exe" \
+      --onefile \
+      --noconfirm \
+      --clean \
+      --log-level=WARN \
+      --hidden-import websockets \
+      --icon "$ROOT_DIR/icon.ico" \
+      --version-file "$ROOT_DIR/version.txt"
+    mv -f "$DIST_DIR/$APP_NAME.exe" "$DIST_DIR/win_cli/$APP_NAME.exe"
+    ;;
+  *)
+    echo "Unsupported OS for build_odbargo-cli.sh"
+    exit 1
+    ;;
+esac
 
+# Optional alternative build (Nuitka)
+# python -m nuitka --onefile --output-filename="$APP_NAME" --include-module=websockets "$ROOT_DIR/cli_entry.py"

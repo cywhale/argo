@@ -4,7 +4,7 @@ import xarray as xr
 
 pytest.importorskip("pandas", reason="pandas is required for plugin filtering tests")
 
-from odbargo_view.plugin import DatasetStore, OdbArgoViewPlugin, PluginError, _build_dataframe
+from odbViz.plugin import DatasetStore, OdbArgoViewPlugin, PluginError, _build_dataframe
 
 
 def make_dataset() -> xr.Dataset:

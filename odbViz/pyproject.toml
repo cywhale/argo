@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "odbargo-view"
-version = "0.2.5"
+version = "0.4.0"
 description = "Viewer/analytics for ODBArgo (xarray/matplotlib)"
 requires-python = ">=3.10"
 dependencies = [
@@ -17,7 +17,7 @@ dependencies = [
 ]
 
 [project.scripts]
-odbargo-view = "odbargo_view.plugin:main"
+odbargo-view = "odbViz.plugin:main"
 
 [tool.hatch.build.targets.wheel]
-packages = ["odbargo_view"]
+packages = ["odbViz"]

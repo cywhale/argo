@@ -82,3 +82,8 @@
         -- fixed antimeridian handling: keep original bbox for projection, grid on 0–360, render on split −180..180 slices for basemap/cartopy, and normalize bbox extents to avoid wraparound
         -- ensured map plots ignore row limits during bbox detection to preserve seam awareness
         -- clarified keynotes doc for dateline handling and stabilized /view plot behavior for datasets opened via CSV or API-fed records
+
+#### ver 0.4.0 uv migration + viewer swap
+        -- migrate project workflow to uv (Python 3.13) and align packaging metadata. Deprecate old Pipfile.
+        -- replace odbargo-view backend with odbViz while keeping install/command compatibility. Plan to deprecate old odbargo_view/ 
+        -- refresh docs and mac CLI build flow. Add new cli executive for Mac OS at dist/mac_cli/
